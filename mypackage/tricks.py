@@ -1,8 +1,9 @@
 # coding=utf-8
 import torch
-from torch.nn import Parameter,Module
+from torch.nn import Parameter, Module
 from torch.autograd import Variable, grad
 import numpy as np
+
 
 def gradPenalty(D_net, real, fake, LAMBDA=10, input=None):
     use_cuda = torch.cuda.is_available()
@@ -36,6 +37,15 @@ def gradPenalty(D_net, real, fake, LAMBDA=10, input=None):
 
 
 def spgradPenalty(D_net, real, fake, input=None, type="G"):
+    """sample gradient penalty
+
+    :param D_net:
+    :param real:
+    :param fake:
+    :param input: only for CGAN, net_D(fake,input)
+    :param type: select "G" or "X". default "X"
+    :return:
+    """
     use_cuda = torch.cuda.is_available()
 
     if type == "G":
@@ -61,19 +71,29 @@ def spgradPenalty(D_net, real, fake, input=None, type="G"):
     return sgp
 
 
-def jcbClamp(G_net, input, lmbda_max=20, lmbda_min=1, ep=1):
+def jcbClamp(G_net, z, lmbda_max=20, lmbda_min=1, ep=1, use_gpu=False):
+    """ implement of jacobin climping.
+    'Is Generator Conditioning Causally Related to GAN Performance?'
+    :param G_net: generate model
+    :param z: input
+    :param lmbda_max: default 20
+    :param lmbda_min: default 1
+    :param ep: default 1
+    :param use_gpu: default False
+    :return:
+    """
     lmbda_max = lmbda_max * torch.ones(1)
     lmbda_min = lmbda_min * torch.ones(1)
-    sigma = torch.randn(input.size())
-    if torch.cuda.is_available():
+    sigma = torch.randn(z.size())
+    if use_gpu:
         lmbda_max = lmbda_max.cuda()
         lmbda_min = lmbda_min.cuda()
         sigma = sigma.cuda()
-    sigma = sigma / torch.norm(sigma, 1) * ep
-    data_ = input + sigma
-    q = torch.norm(G_net(input) - G_net(data_), 1) / torch.norm(input - data_, 1)
-    l_max = (torch.max(q, lmbda_max) - lmbda_max) ** 2
-    l_min = (torch.min(q, lmbda_min) - lmbda_min) ** 2
+    sigma = sigma / torch.norm(sigma, 2) * ep
+    z_ = z + sigma
+    Q = torch.norm(G_net(z) - G_net(z_), 2) / torch.norm(z - z_, 2)
+    l_max = (torch.max(Q, lmbda_max) - lmbda_max) ** 2
+    l_min = (torch.min(Q, lmbda_min) - lmbda_min) ** 2
     return (l_max + l_min).mean()
 
 
@@ -83,7 +103,8 @@ class Cutout(object):
         n_holes (int): Number of patches to cut out of each image.
         length (int): The length (in pixels) of each square patch.
     """
-    def __init__(self, n_holes, length, mask_numb = .0):
+
+    def __init__(self, n_holes, length, mask_numb=.0):
         self.n_holes = n_holes
         self.length = length
         self.mask_numb = mask_numb
@@ -134,8 +155,8 @@ class SpectralNorm(Module):
 
         height = w.data.shape[0]
         for _ in range(self.power_iterations):
-            v.data = self._l2normalize(torch.mv(torch.t(w.view(height,-1).data), u.data))
-            u.data = self._l2normalize(torch.mv(w.view(height,-1).data, v.data))
+            v.data = self._l2normalize(torch.mv(torch.t(w.view(height, -1).data), u.data))
+            u.data = self._l2normalize(torch.mv(w.view(height, -1).data, v.data))
 
         # sigma = torch.dot(u.data, torch.mv(w.view(height,-1).data, v.data))
         sigma = u.dot(w.view(height, -1).mv(v))
@@ -168,7 +189,7 @@ class SpectralNorm(Module):
         self.module.register_parameter(self.name + "_v", v)
         self.module.register_parameter(self.name + "_bar", w_bar)
 
-    def _l2normalize(self,v, eps=1e-12):
+    def _l2normalize(self, v, eps=1e-12):
         return v / (v.norm() + eps)
 
     def forward(self, *args):

@@ -21,7 +21,7 @@ class ElapsedTimer(object):
 
 
 class Model():
-    def __init__(self, epoch=30, gpus=None):
+    def __init__(self, epoch=30, gpus=None, model_path=None, model_weights_path=None):
         self.epoch = epoch
         self.model_path = "checkpoint/Model_G_{}.pth".format(self.epoch)
         self.model_weights_path = "checkpoint/Model_weights_G_{}.pth".format(self.epoch)
@@ -51,13 +51,13 @@ class Model():
         return model.eval()
 
 
-def checkPoint(netG, netD, epoch):
+def checkPoint(netG, netD, epoch, name=""):
     if not os.path.exists("checkpoint"):
         os.mkdir("checkpoint")
-    g_model_weights_path = "checkpoint/Model_weights_G_{}.pth".format(epoch)
-    d_model_weights_path = "checkpoint/Model_weights_D_{}.pth".format(epoch)
-    g_model_path = "checkpoint/Model_G_{}.pth".format(epoch)
-    d_model_path = "checkpoint/Model_D_{}.pth".format(epoch)
+    g_model_weights_path = "checkpoint/{}Model_weights_G_{}.pth".format(name, epoch)
+    d_model_weights_path = "checkpoint/{}Model_weights_D_{}.pth".format(name, epoch)
+    g_model_path = "checkpoint/{}Model_G_{}.pth".format(name, epoch)
+    d_model_path = "checkpoint/{}Model_D_{}.pth".format(name, epoch)
     save(netG.state_dict(), g_model_weights_path)
     save(netD.state_dict(), d_model_weights_path)
     save(netG, g_model_path)
@@ -65,9 +65,9 @@ def checkPoint(netG, netD, epoch):
     print("Checkpoint saved !")
 
 
-def loadCheckPoint(netG, netD, epoch):
-    net_g_model_out_path = "checkpoint/netG_model_epoch_{}.pth".format(epoch)
-    net_d_model_out_path = "checkpoint/netD_model_epoch_{}.pth".format(epoch)
+def loadCheckPoint(netG, netD, epoch, name=""):
+    net_g_model_out_path = "checkpoint/{}Model_weights_G_{}.pth".format(name, epoch)
+    net_d_model_out_path = "checkpoint/{}Model_weights_D_{}.pth".format(name, epoch)
     netG.load_state_dict(load(net_g_model_out_path))
     netD.load_state_dict(load(net_d_model_out_path))
     print("Checkpoint loaded !")
@@ -78,3 +78,10 @@ def loadG_Model(epoch):
     model_out_path = "checkpoint/Model_G_{}.pth".format(epoch)
     G_model = load(model_out_path)
     return G_model
+
+
+def writeNetwork(writer, net, *input):
+    if input == None:
+        input = torch.autograd.Variable(torch.Tensor(1, 1, 28, 28), requires_grad=True)
+    res = net(input)
+    writer.add_graph(net, res)

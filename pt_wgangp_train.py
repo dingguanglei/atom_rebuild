@@ -3,6 +3,7 @@ import time
 import os
 import random
 import torch
+import copy
 from torch.nn import BCELoss, MSELoss, CrossEntropyLoss, BCEWithLogitsLoss
 from torch import cuda
 from torch.autograd import Variable
@@ -14,14 +15,16 @@ from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 from mypackage.data import IMAGE_PATH, MASK_PATH_DIC, getDataLoader
-from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model
+from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, writeNetwork
 from mypackage.tricks import gradPenalty, spgradPenalty, jcbClamp
 from mypackage.model.define import defineNet
 from mypackage.model.unet import NLayer_D, Unet_G
+from mypackage.model.wnet import NLayer_D, Wnet_G
 
 
 class Trainer(object):
-    def __init__(self, netG, netD, train_loader, test_loader=None, cv_loader=None):
+    def __init__(self, netG, netD, train_loader, test_loader=None, cv_loader=None, gpus=()):
+        self.use_gpus = torch.cuda.is_available() & (len(gpus) > 0)
         self.train_loader = train_loader
         self.test_loader = test_loader
         self.cv_loader = cv_loader
@@ -30,12 +33,17 @@ class Trainer(object):
         self.count = 0
         self.steps = len(train_loader)
         self.losses = {'G': [], 'D': [], 'GP': [], "SGP": [], 'WD': [], 'GN': [], 'JC': []}
-        self.valid_losses = {'G': [], 'D': [], 'WD': []}
+        self.valid_losses = {'G': [], 'D': [], 'WD': [],'JC':[]}
         self.writer = SummaryWriter(log_dir="log")
-        self.lr = 1e-4
+        self.lr = 2e-3
+        self.lr_decay = 0.94
         self.weight_decay = 2e-5
         self.opt_g = Adam(self.netG.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
         self.opt_d = RMSprop(self.netD.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+
+        input = torch.autograd.Variable(torch.Tensor(4, 1, 256, 256), requires_grad=True)
+        net_cpu = copy.deepcopy(self.netG.module)
+        self.writer.add_graph(model=net_cpu.cpu(), input_to_model=input)
 
     def _dis_train_iteration(self, input, fake, real):
         self.opt_d.zero_grad()
@@ -44,7 +52,8 @@ class Trainer(object):
         d_real = self.netD(real, input)
 
         gp = gradPenalty(self.netD, real, fake, input=input)
-        sgp = spgradPenalty(self.netD, input, real, fake, type="G") * 0.5
+        sgp = spgradPenalty(self.netD, input, real, fake, type="G") * 0.5 + \
+              spgradPenalty(self.netD, input, real, fake, type="X") * 0.5
         loss_d = d_fake.mean() - d_real.mean() + gp + sgp
         w_distance = (d_real.mean() - d_fake.mean()).detach()
         loss_d.backward()
@@ -63,12 +72,13 @@ class Trainer(object):
 
         fake = self.netG(input)
         d_fake = self.netD(fake, input)
-
-        loss_g = -d_fake.mean()
+        jc = jcbClamp(self.netG, input, use_gpu=self.use_gpus)
+        loss_g = -d_fake.mean() + jc
         loss_g.backward()
         self.opt_g.step()
-
+        self.losses["JC"].append(jc.detach())
         self.losses["G"].append(loss_g.detach())
+        self._watchLoss(["JC"], loss_dic=self.losses, type="Train")
         self._watchLoss(["G"], loss_dic=self.losses, type="Train")
         g_log = "Loss_G: {:.4f}".format(loss_g.detach())
         return g_log
@@ -99,7 +109,7 @@ class Trainer(object):
     def train(self):
         input = Variable()
         real = Variable()
-        if cuda.is_available():
+        if self.use_gpus:
             input = input.cuda()
             real = real.cuda()
         startEpoch = 1
@@ -109,10 +119,11 @@ class Trainer(object):
             timer = ElapsedTimer()
             self._train_epoch(input, real)
             self.valid()
+            self._watchNetParams(self.netG, epoch)
             left_time = timer.elapsed((nepochs - epoch) * (time.time() - timer.start_time))
             print("leftTime: %s" % left_time)
             if epoch % 2 == 0:
-                self.lr = self.lr * 0.92
+                self.lr = self.lr * self.lr_decay
                 self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=weight_decay)
                 self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=weight_decay)
                 print("change learning rate to %s" % self.lr)
@@ -120,6 +131,12 @@ class Trainer(object):
                 self.predict()
                 checkPoint(net_G, net_D, epoch)
         self.writer.close()
+
+    def _watchNetParams(self, net, count):
+        for name, param in net.named_parameters():
+            if "bias" in name:
+                continue
+            self.writer.add_histogram(name, param.clone().cpu().data.numpy(), count)
 
     def _watchLoss(self, loss_keys, loss_dic, type="Train"):
         for key in loss_keys:
@@ -130,12 +147,16 @@ class Trainer(object):
         input_torch = None
         prediction_torch = None
         real_torch = None
-        for i in range(show_imgs_num):
-            randindex = random.randint(0, len(input) - 1)
+        batchSize = input.shape[0]
+        show_nums = min(show_imgs_num,batchSize)
+        randindex_list = random.sample(list(range(batchSize)), show_nums)
+        for randindex in randindex_list:
             input_torch = input[randindex].cpu().detach()
             input_torch = transforms.Normalize([-1], [2])(input_torch)
+
             prediction_torch = fake[randindex].cpu().detach()
             prediction_torch = transforms.Normalize([-1], [2])(prediction_torch)
+
             real_torch = real[randindex].cpu().detach()
             real_torch = transforms.Normalize([-1], [2])(real_torch)
             out_1 = torch.stack((input_torch, prediction_torch, real_torch))
@@ -161,7 +182,7 @@ class Trainer(object):
         for input, real in self.test_loader:
             input = Variable(input)
             real = Variable(real)
-            if cuda.is_available():
+            if self.use_gpus:
                 input = input.cuda()
                 real = real.cuda()
             self.netG.eval()
@@ -180,7 +201,7 @@ class Trainer(object):
         self.netD.eval()
         input = Variable()
         real = Variable()
-        if cuda.is_available():
+        if self.use_gpus:
             input = input.cuda()
             real = real.cuda()
         len_test_data = len(self.cv_loader)
@@ -228,22 +249,24 @@ def buildDir():
 
 if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+    print('===> Check directories')
     buildDir()
 
     gpus = (0, 1)
     # gpus = []
     d_depth = 32
     g_depth = 32
-    lr = 1e-3
+    lr = 2e-3
     beta1 = 0.9
     weight_decay = 2e-5
 
-    batchSize = 16
-    nepochs = 50
+    batchSize = 8
+    nepochs = 100
 
     test_size = 500
     train_size = None
     cv_size = 500
+    torch.backends.cudnn.benchmark = True
 
     print('===> Build dataset')
     trainLoader, testLoader, cvLoader = getDataLoader(
@@ -255,10 +278,13 @@ if __name__ == '__main__':
         valid_size=cv_size)
 
     print('===> Building model')
-    net_G = defineNet(Unet_G(depth=g_depth, norm_type="instance"),
+    # net_G = defineNet(Unet_G(depth=g_depth, norm_type="instance"),
+    #                   gpu_ids=gpus, use_weights_init=True)
+    net_G = defineNet(Wnet_G(depth=g_depth, active_type="LeakyReLU", norm_type="instance"),
                       gpu_ids=gpus, use_weights_init=True)
     net_D = defineNet(NLayer_D(depth=d_depth, norm_type="instance", use_sigmoid=False, use_liner=False),
                       gpu_ids=gpus, use_weights_init=True)
+
     print('===> Training')
-    Trainer = Trainer(net_G, net_D, trainLoader, testLoader, cvLoader)
+    Trainer = Trainer(net_G, net_D, trainLoader, testLoader, cvLoader, gpus)
     Trainer.train()
