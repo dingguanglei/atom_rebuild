@@ -1,9 +1,9 @@
 # coding = utf-8
 import torch.cuda
-from torch.nn import Conv2d, Linear, ConvTranspose2d, InstanceNorm2d, BatchNorm2d, init, DataParallel,Module
+from torch.nn import Conv2d, Linear, ConvTranspose2d, InstanceNorm2d, BatchNorm2d, init, DataParallel, Module
 
 
-def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True):
+def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True, show_structure=False):
     """define network, according to CPU, GPU and multi-GPUs.
 
     :param net: Network, type of module.
@@ -11,18 +11,18 @@ def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True):
     :param use_weights_init: If init weights ( method of Hekaiming init).
     :return: Network
     """
-    assert isinstance("module", net), "type %s is not 'mudule' type"% type(net)
-    print_network(net)
+    # assert isinstance(Module, net), "type %s is not 'mudule' type"% type(net)
+    print_network(net, show_structure)
     gpu_available = torch.cuda.is_available()
-    model_name= type(net)
+    model_name = type(net)
     if (len(gpu_ids) == 1) & gpu_available:
         net = net.cuda(gpu_ids[0])
-        print("%s model use GPU(%d)!" % (model_name,gpu_ids[0]))
-    elif (len(gpu_ids) > 1 )& gpu_available:
+        print("%s model use GPU(%d)!" % (model_name, gpu_ids[0]))
+    elif (len(gpu_ids) > 1) & gpu_available:
         net = DataParallel(net.cuda(), gpu_ids)
-        print("%s dataParallel use GPUs%s!" % (model_name,gpu_ids))
+        print("%s dataParallel use GPUs%s!" % (model_name, gpu_ids))
     else:
-        print("%s model use CPU!"% (model_name))
+        print("%s model use CPU!" % (model_name))
 
     if use_weights_init:
         net.apply(weightsInit)
@@ -30,7 +30,7 @@ def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True):
     return net
 
 
-def print_network(net, show_structure = False):
+def print_network(net, show_structure=False):
     """print total number of parameters and structure of network
 
     :param net: network
@@ -43,7 +43,7 @@ def print_network(net, show_structure = False):
         num_params += param.numel()
     if show_structure:
         print(net)
-    print('%s Total number of parameters: %d' % (model_name,num_params))
+    print('%s Total number of parameters: %d' % (model_name, num_params))
 
 
 def weightsInit(m):

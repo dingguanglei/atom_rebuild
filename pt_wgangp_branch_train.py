@@ -11,12 +11,12 @@ import torchvision.transforms as transforms
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
-from mypackage.data import IMAGE_PATH, MASK_PATH_DIC, getDataLoader
+from mypackage.data import IMAGE_PATH, MASK_PATH_DIC, NOISE_PATH_DIC, getDataLoader,BranchGetDataLoader
 from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, writeNetwork
 from mypackage.tricks import gradPenalty, spgradPenalty, jcbClamp
 from mypackage.model.define import defineNet
 # from mypackage.model.unet import NLayer_D, Unet_G
-from mypackage.model.wnet import NLayer_D, Wnet_G, Branch_Wnet_G, Branch_NLayer_D
+from mypackage.model.wnet import NLayer_D, Wnet_G, Branch_Wnet_G,Branch_NLayer_D
 
 
 class Trainer(object):
@@ -270,24 +270,24 @@ if __name__ == '__main__':
     test_size = 500
     train_size = None
     cv_size = 500
-
     torch.backends.cudnn.benchmark = True
-
+    nN = 0
+    nN_nBG_SR = 1
+    gaussian = 2
     print('===> Build dataset')
-    trainLoader, testLoader, cvLoader = getDataLoader(
+    trainLoader, testLoader, cvLoader = BranchGetDataLoader(
         image_dir_path=IMAGE_PATH,
-        mask_dir_path=MASK_PATH_DIC["gaussian"],
+        label_dir_paths=[NOISE_PATH_DIC["nN"], NOISE_PATH_DIC["nN_nBG_SR"], MASK_PATH_DIC["gaussian"]],
         batch_size=batchSize,
         test_size=test_size,
         train_size=train_size,
         valid_size=cv_size)
 
     print('===> Building model')
-    # net_G = defineNet(Unet_G(depth=g_depth, norm_type="instance"),
-    #                   gpu_ids=gpus, use_weights_init=True)
-    net_G = defineNet(Wnet_G(depth=g_depth, active_type="LeakyReLU", norm_type="instance"),
-                      gpu_ids=gpus, use_weights_init=True)
-    net_D = defineNet(NLayer_D(depth=d_depth, norm_type="instance", use_sigmoid=False, use_liner=False),
+
+    net_G = defineNet(Branch_Wnet_G(depth=g_depth, active_type="LeakyReLU", norm_type="instance"),
+                      gpu_ids=gpus, use_weights_init=True, show_structure=True)
+    net_D = defineNet(Branch_NLayer_D(depth=d_depth, norm_type="instance", use_sigmoid=False),
                       gpu_ids=gpus, use_weights_init=True)
 
     print('===> Training')

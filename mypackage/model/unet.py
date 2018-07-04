@@ -2,6 +2,7 @@
 from torch.nn import Module, Sequential, Conv2d, BatchNorm2d, InstanceNorm2d, LeakyReLU, Linear, Sigmoid, Upsample, \
     Tanh, Dropout, ReLU, MaxPool2d, AvgPool2d
 import torch
+from .shared.basic import getNormLayer,getActiveLayer
 
 
 class NLayer_D(Module):
@@ -146,25 +147,3 @@ class Unet_G(Module):
         output = self.u7(u7)
 
         return output
-
-
-def getNormLayer(norm_type):
-    norm_layer = BatchNorm2d
-    if norm_type == 'batch':
-        norm_layer = BatchNorm2d
-    elif norm_type == 'instance':
-        norm_layer = InstanceNorm2d
-    else:
-        print('normalization layer [%s] is not found' % norm_type)
-    return norm_layer
-
-
-def getActiveLayer(active_type):
-    active_layer = ReLU
-    if active_type == 'ReLU':
-        active_layer = ReLU
-    elif active_type == 'LeakyReLU':
-        active_layer = LeakyReLU
-    else:
-        print('active layer [%s] is not found' % active_layer)
-    return active_layer
