@@ -3,6 +3,8 @@ import os
 import platform
 import random
 import copy
+import math
+import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 import torchvision.datasets as dset
@@ -73,6 +75,47 @@ class AtomDataset(Dataset):
         return x, y
 
 
+class TestDataset(Dataset):
+    def __init__(self, test_dir_path, transform_list=None, min_size=32):
+        self.test_img = []
+        self.imagesNames = []
+        self.min_size = min_size
+        if transform_list is None:
+            transform_list = [
+                transforms.ToTensor(),  # (H x W x C)=> (C x H x W)
+                transforms.Normalize([0.5], [0.5])
+            ]
+        self.transform = transforms.Compose(transform_list)
+
+        for root, dirs, files in os.walk(test_dir_path):
+            self.imagesNames = files
+            break
+        self.nums = len(self.imagesNames)
+
+        for index in range(self.nums):
+            IMG_URL = slash.join((test_dir_path, self.imagesNames[index]))
+            with Image.open(IMG_URL) as img:
+                img = img.convert("L")
+            self.test_img.append(img)
+
+    def __len__(self):
+        return self.nums
+
+    def __getitem__(self, index):
+        img = self.test_img[index]
+        row, col = img.size
+        padding_row = (self.min_size * math.ceil(row / self.min_size) - row)
+        padding_col = (self.min_size * math.ceil(col / self.min_size) - col)
+        padding_left = math.ceil(padding_row / 2)
+        padding_right = math.floor(padding_row / 2)
+        padding_top = math.ceil(padding_col / 2)
+        padding_bottom = math.floor(padding_col / 2)
+        #  left, top, right and bottom borders
+        x = transforms.Pad((padding_left, padding_top, padding_right, padding_bottom), fill=0)(img)
+        x = self.transform(x)
+        return x
+
+
 class BranchAtomDataset(Dataset):
     def __init__(self, x_file_names, y_file_names, transform_list_input, x_dir_path, y_dir_paths,
                  transform_list_real=None):
@@ -106,9 +149,10 @@ class BranchAtomDataset(Dataset):
         random.seed(n)
         x = self.transform_input(self.x[index])
         ys = []
-        for y in  self.y[index]:
+        for y in self.y[index]:
             random.seed(n)
             ys.append(self.transform_real(y))
+        ys = torch.cat(ys)
         return x, ys
 
 
@@ -258,8 +302,8 @@ def BranchGetDataLoader(image_dir_path,
         random_state=35,
         train_size=train_size)
 
-    if valid_size is not None:
-        if train_size is not None:
+    if valid_size:
+        if train_size:
             assert (train_size > valid_size), "Do not have enough train data(%d) to split a valid data(%d)" % (
                 train_size, valid_size)
             train_size = train_size - valid_size
@@ -305,24 +349,27 @@ def BranchGetDataLoader(image_dir_path,
 
     return trainLoader, testLoader, validLoader
 
+
 def CheckLoader(loader):
     count = 0
-    for i, j in loader:
-        a = transforms.Normalize([-1], [2])(i[0])
-        a = transforms.ToPILImage()(a.reshape(1, 256, 256)).convert("L")
+    for index, batch in enumerate(loader):
+        input = batch[0]  # [2,1,256,256]
+        real = batch[1]  # [2,3,256,256]
 
-        b = transforms.Normalize([-1], [2])(j[0][0])
+        a = transforms.Normalize([-1], [2])(input[0])
+        a = transforms.ToPILImage()(a.reshape(1, 256, 256)).convert("L")
+        b = transforms.Normalize([-1], [2])(real[0][0].reshape(1, 256, 256))
         b = transforms.ToPILImage()(b.reshape(1, 256, 256)).convert("L")
-        c = transforms.Normalize([-1], [2])(j[1][0])
+        c = transforms.Normalize([-1], [2])(real[0][1].reshape(1, 256, 256))
         c = transforms.ToPILImage()(c.reshape(1, 256, 256)).convert("L")
-        d = transforms.Normalize([-1], [2])(j[2][0])
+        d = transforms.Normalize([-1], [2])(real[0][2].reshape(1, 256, 256))
         d = transforms.ToPILImage()(d.reshape(1, 256, 256)).convert("L")
         a.show()
         b.show()
         c.show()
         d.show()
         count += 1
-        if count == 2:
+        if count == 4:
             break
 
 # if __name__ == '__main__':

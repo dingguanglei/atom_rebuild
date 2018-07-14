@@ -1,6 +1,6 @@
 # coding=utf-8
 import torch
-from torch.nn import Parameter, Module
+from torch.nn import Parameter, Module, Linear
 from torch.autograd import Variable, grad
 import numpy as np
 
@@ -31,6 +31,45 @@ def gradPenalty(D_net, real, fake, LAMBDA=10, input=None):
         create_graph=True,
         retain_graph=True,
         only_inputs=True)[0]
+
+    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * LAMBDA
+    return gradient_penalty
+
+
+def Branch_gradPenalty(D_net, reals, fakes, LAMBDA=10, input=None):
+    use_cuda = torch.cuda.is_available()
+    batch_size = reals.size()[0]
+    # Calculate interpolation
+    alpha = torch.rand(batch_size, 1, 1, 1)
+    alpha = alpha.expand_as(reals)
+
+    alpha = alpha.cuda() if use_cuda else alpha
+
+    interpolates = alpha * reals + ((1 - alpha) * fakes)
+
+    if torch.cuda.is_available():
+        interpolates = interpolates.cuda()
+    interpolates = Variable(interpolates, requires_grad=True)
+    if input is not None:
+        shape = fakes.shape
+        fake_NN = fakes[:, 0, :, :].view(shape[0], 1, shape[2], shape[3])
+        fake_NN_NBG_SR = fakes[:, 1, :, :].view(shape[0], 1, shape[2], shape[3])
+        fake_GAUSSIAN = fakes[:, 2, :, :].view(shape[0], 1, shape[2], shape[3])
+        d_fake_NN = D_net(fake_NN, input)[:, 0, :, :].view(shape[0], 1, 16, 16)
+        d_fake_NN_NBG_SR = D_net(fake_NN_NBG_SR, input)[:, 1, :, :].view(shape[0], 1, 16, 16)
+        d_fake_GAUSSIAN = D_net(fake_GAUSSIAN, input)[:, 2, :, :].view(shape[0], 1, 16, 16)
+        disc_interpolates = torch.cat([d_fake_NN, d_fake_NN_NBG_SR, d_fake_GAUSSIAN], 1)
+    else:
+        disc_interpolates = D_net(interpolates)
+    gradients = grad(
+        outputs=disc_interpolates,
+        inputs=interpolates,
+        grad_outputs=torch.ones(disc_interpolates.size()).cuda()
+        if use_cuda else torch.ones(disc_interpolates.size()),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True,
+        allow_unused=True)[0]
 
     gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * LAMBDA
     return gradient_penalty
@@ -195,3 +234,4 @@ class SpectralNorm(Module):
     def forward(self, *args):
         self._update_u_v()
         return self.module.forward(*args)
+

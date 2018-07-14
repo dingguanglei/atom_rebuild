@@ -1,5 +1,6 @@
 # coding=utf-8
 from torch import save, load
+from torch.nn import DataParallel
 import torch
 import time, os
 
@@ -21,32 +22,60 @@ class ElapsedTimer(object):
 
 
 class Model():
-    def __init__(self, epoch=30, gpus=None, model_path=None, model_weights_path=None):
+    def __init__(self, epoch=30, gpus=None, model_path=None, model_weights_path=None, name=""):
         self.epoch = epoch
-        self.model_path = "checkpoint/Model_G_{}.pth".format(self.epoch)
-        self.model_weights_path = "checkpoint/Model_weights_G_{}.pth".format(self.epoch)
+        self.model_path = "checkpoint/{}Model_G_{}.pth".format(name, self.epoch)
+        self.model_weights_path = "checkpoint/{}Model_weights_G_{}.pth".format(name, self.epoch)
         self.model = self.loadModel(gpus)
 
     def loadModel(self, gpus=None):
         model_path = self.model_path
         model_weights_path = self.model_weights_path
-        if torch.cuda.is_available() and (gpus is not None):
-            print("load model uses GPU")
-            model = torch.load(model_path, map_location=lambda storage, loc: storage.cuda(gpus)).module
-            weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage.cuda(gpus))
-            model.load_state_dict(weights)
-        else:
-            print("load model uses CPU")
-            model = torch.load(model_path, map_location=lambda storage, loc: storage).module
-            weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage)
+        print("load model uses CPU...")
+        model = torch.load(model_path, map_location=lambda storage, loc: storage)
+        print("load weights uses CPU...")
+        weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage)
 
+        if model.module:
+            print("deal with dataparallel...")
+            model = model.module
             from collections import OrderedDict
             new_state_dict = OrderedDict()
             for k, v in weights.items():
                 name = k[7:]  # remove `module.`
                 new_state_dict[name] = v
+            weights = new_state_dict
             # load params
-            model.load_state_dict(new_state_dict)
+
+        model.load_state_dict(weights)
+        if torch.cuda.is_available() and (len(gpus) == 1):
+            print("convert to GPU %s" % str(gpus))
+            model = model.cuda()
+        elif torch.cuda.is_available() and (len(gpus) > 1):
+            print("convert to GPUs %s" % str(gpus))
+            model = DataParallel(model,gpus).cuda()
+        # if torch.cuda.is_available() and (gpus is not None):
+        #     print("load model uses GPU")
+        #     model = torch.load(model_path, map_location=lambda storage, loc: storage.cuda(gpus))
+        #     # model = torch.load(model_path, map_location=lambda storage, loc: storage)
+        #     if model.module:
+        #         model = model.module
+        #     weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage.cuda(gpus))
+        #     model.load_state_dict(weights)
+        # else:
+        #     print("load model uses CPU")
+        #     model = torch.load(model_path, map_location=lambda storage, loc: storage)
+        #     if model.module:
+        #         model = model.module
+        #     weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage)
+        #
+        #     from collections import OrderedDict
+        #     new_state_dict = OrderedDict()
+        #     for k, v in weights.items():
+        #         name = k[7:]  # remove `module.`
+        #         new_state_dict[name] = v
+        #     # load params
+        #     model.load_state_dict(new_state_dict)
 
         return model.eval()
 
@@ -85,3 +114,10 @@ def writeNetwork(writer, net, *input):
         input = torch.autograd.Variable(torch.Tensor(1, 1, 28, 28), requires_grad=True)
     res = net(input)
     writer.add_graph(net, res)
+
+
+def buildDir(dirs = ("plots", "plots/Test", "plots/Train", "plots/Valid", "checkpoint")):
+    for dir in dirs:
+        if not os.path.exists(dir):
+            print("%s directory is not found. Build now!" % dir)
+            os.mkdir(dir)

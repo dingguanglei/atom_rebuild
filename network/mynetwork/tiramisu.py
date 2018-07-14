@@ -6,9 +6,9 @@ from torch.autograd import Variable
 
 
 class FCDenseNet(nn.Module):
-    def __init__(self, in_channels=1, down_blocks=(5, 5, 5, 5, 5),
+    def __init__(self, in_channels=1, out_channels=1, down_blocks=(5, 5, 5, 5, 5),
                  up_blocks=(5, 5, 5, 5, 5), bottleneck_layers=5,
-                 growth_rate=16, out_chans_first_conv=48, n_classes=12):
+                 growth_rate=16, out_chans_first_conv=48):
         super(FCDenseNet, self).__init__()
         # super().__init__
         self.down_blocks = down_blocks
@@ -75,7 +75,7 @@ class FCDenseNet(nn.Module):
         ## Softmax ##
 
         self.finalConv = nn.Conv2d(in_channels=cur_channels_count,
-                                   out_channels=n_classes, kernel_size=1, stride=1,
+                                   out_channels=out_channels, kernel_size=1, stride=1,
                                    padding=0, bias=True)
         # self.softmax = nn.LogSoftmax(dim=1)
         self.tanh = nn.Tanh()

@@ -197,20 +197,20 @@ class Branch_NLayer_D(Module):
         self.use_sigmoid = use_sigmoid
 
         # 256 x 256
-        self.layer1 = convLayer(input_nc + output_nc, depth, 8, 2, 3, active_type=active_type, norm_type=None,
-                                groups=groups)
+        self.layer1 = convLayer(input_nc + input_nc, depth, 8, 2, 3, active_type=active_type, norm_type=None,
+                                 groups=groups)
 
         # 128 x 128
         self.layer2 = convLayer(depth, depth * 2, 4, 2, 1, active_type=active_type, norm_type=norm_type,
-                                groups=groups)
+                                 groups=groups)
 
         # 64 x 64
         self.layer3 = convLayer(depth * 2, depth * 4, 4, 2, 1, active_type=active_type, norm_type=norm_type,
-                                groups=groups)
+                                 groups=groups)
 
         # 32 x 32
         self.layer4 = convLayer(depth * 4, depth * 8, 4, 2, 1, active_type=active_type, norm_type=norm_type,
-                                groups=groups)
+                                 groups=groups)
 
         # 16 x 16
         self.layer5 = Conv2d(depth * 8, output_nc, kernel_size=5, stride=1, padding=2)

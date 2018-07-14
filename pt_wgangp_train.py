@@ -12,11 +12,11 @@ from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 from mypackage.data import IMAGE_PATH, MASK_PATH_DIC, getDataLoader
-from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, writeNetwork
+from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, writeNetwork,buildDir
 from mypackage.tricks import gradPenalty, spgradPenalty, jcbClamp
 from mypackage.model.define import defineNet
-# from mypackage.model.unet import NLayer_D, Unet_G
-from mypackage.model.wnet import NLayer_D, Wnet_G, Branch_Wnet_G, Branch_NLayer_D
+from mypackage.model.unet import Unet_G
+from mypackage.model.wnet import NLayer_D, Wnet_G
 
 
 class Trainer(object):
@@ -32,19 +32,19 @@ class Trainer(object):
         self.losses = {'G': [], 'D': [], 'GP': [], "SGP": [], 'WD': [], 'GN': [], 'JC': []}
         self.valid_losses = {'G': [], 'D': [], 'WD': [], 'JC': []}
         self.writer = SummaryWriter(log_dir="log")
-        self.lr = 2e-3
+        self.lr = 1e-3
         self.lr_decay = 0.94
         self.weight_decay = 2e-5
-        self.nepochs = 100
+        self.nepochs = 500
         self.opt_g = Adam(self.netG.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
         self.opt_d = RMSprop(self.netD.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
         input = torch.autograd.Variable(torch.Tensor(4, 1, 256, 256), requires_grad=True)
-        net_cpu = copy.deepcopy(self.netG)
+        net_cpu = copy.deepcopy(self.netG.module)
         out = net_cpu.cpu()(input)
         self.writer.add_graph(model=net_cpu.cpu(), input_to_model=input)
-        self.writer.close()
-        exit(1)
+        # self.writer.close()
+        # exit(1)
 
     def _dis_train_iteration(self, input, fake, real):
         self.opt_d.zero_grad()
@@ -123,21 +123,26 @@ class Trainer(object):
             self._watchNetParams(self.netG, epoch)
             left_time = timer.elapsed((self.nepochs - epoch) * (time.time() - timer.start_time))
             print("leftTime: %s" % left_time)
-            if epoch == 10:
-                self.lr = self.lr / 10
+            if epoch % 5 == 0 :
+                self.lr = self.lr *self.lr_decay
                 self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
                 self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
                 print("change learning rate to %s" % self.lr)
-            elif epoch == 20:
-                self.lr = self.lr / 10
-                self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
-                self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-                print("change learning rate to %s" % self.lr)
-            elif epoch == 40:
-                self.lr = self.lr / 10
-                self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
-                self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-                print("change learning rate to %s" % self.lr)
+            # elif epoch == 20:
+            #     self.lr = self.lr / 10
+            #     self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
+            #     self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            #     print("change learning rate to %s" % self.lr)
+            # elif epoch == 40:
+            #     self.lr = self.lr / 10
+            #     self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
+            #     self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            #     print("change learning rate to %s" % self.lr)
+            # elif epoch == 80:
+            #     self.lr = self.lr / 10
+            #     self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
+            #     self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            #     print("change learning rate to %s" % self.lr)
             if epoch % 10 == 0:
                 self.predict()
                 checkPoint(net_G, net_D, epoch)
@@ -147,7 +152,7 @@ class Trainer(object):
         for name, param in net.named_parameters():
             if "bias" in name:
                 continue
-            self.writer.add_histogram(name, param.clone().cpu().data.numpy(), count)
+            self.writer.add_histogram(name, param.clone().cpu().data.numpy(), count,bins="auto")
 
     def _watchLoss(self, loss_keys, loss_dic, type="Train"):
         for key in loss_keys:
@@ -250,12 +255,9 @@ class Trainer(object):
         return avg_w_distance
 
 
-def buildDir():
-    dirs = ["plots", "plots/Test", "plots/Train", "plots/Valid", "checkpoint"]
-    for dir in dirs:
-        if not os.path.exists(dir):
-            print("%s directory is not found. Build now!" % dir)
-            os.mkdir(dir)
+
+
+
 
 
 if __name__ == '__main__':
@@ -265,8 +267,8 @@ if __name__ == '__main__':
 
     gpus = (0, 1)
     d_depth = 32
-    g_depth = 24
-    batchSize = 8
+    g_depth = 32
+    batchSize = 16
     test_size = 500
     train_size = None
     cv_size = 500
@@ -283,10 +285,10 @@ if __name__ == '__main__':
         valid_size=cv_size)
 
     print('===> Building model')
-    # net_G = defineNet(Unet_G(depth=g_depth, norm_type="instance"),
-    #                   gpu_ids=gpus, use_weights_init=True)
-    net_G = defineNet(Wnet_G(depth=g_depth, active_type="LeakyReLU", norm_type="instance"),
+    net_G = defineNet(Unet_G(depth=g_depth, norm_type="switch"),
                       gpu_ids=gpus, use_weights_init=True)
+    # net_G = defineNet(Wnet_G(depth=g_depth, active_type="LeakyReLU", norm_type="switch"),
+    #                   gpu_ids=gpus, use_weights_init=True)
     net_D = defineNet(NLayer_D(depth=d_depth, norm_type="instance", use_sigmoid=False, use_liner=False),
                       gpu_ids=gpus, use_weights_init=True)
 

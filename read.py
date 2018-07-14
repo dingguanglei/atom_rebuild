@@ -1,62 +1,57 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 import os
+import sys
+import argparse
 from skimage import data
-from sklearn.model_selection import train_test_split
+from torch.autograd import Variable
+from mypackage.utils import Model, buildDir
+from mypackage.data import TestDataset
 
-
-class AtomDataset(Dataset):
-    """Face Landmarks dataset."""
-
-    def __init__(self, img_x_path="process_plots/O/"):
-
-        self.img = self.__readImages(img_x_path, startPoint=0)
-
-        transform_list = [transforms.ToTensor(),  # (H x W x C)=> (C x H x W)
-                          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-        self.transform = transforms.Compose(transform_list)
-
-    def __readImages(self, imagePath, startPoint=0):
-
-        imageData = []
-
-        imagesNames = []
-
-        for root, dirs, files in os.walk(imagePath):
-            imagesNames = files[0:10]
-            break
-
-        for index in range(startPoint, len(imagesNames)):
-            imageData.append(data.imread(imagePath + imagesNames[index]) / 256)
-
-        imageData = np.array(imageData, dtype=np.float32).reshape(-1, 256, 256, 1)
-
-        return imageData
-
-    def __len__(self):
-        return len(self.img)
-
-    def __getitem__(self, index):
-        img = self.img[index]
-        return img
-
+from tensorboardX import SummaryWriter
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    epoch = 30
-    testDataset = DataLoader(AtomDataset(),batch_size=1)
-    g_model_out_path = "checkpoint/Model_G_{}.pth".format(epoch)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+    writer = SummaryWriter("log")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--epoch', '-e', type=int, help='display an integer as epoch of model')
+    parser.add_argument('--test_dir', '-td', type=str, help='path of test directory', default="test")
+    parser.add_argument('--result_dir', '-rd', type=str, help='path of result directory', default="result")
+    parser.add_argument('--model_name', '-mn', type=str, help='model name', default="")
+    parser.add_argument('--min_size', '-mn', type=str, help='model name', default=32*4)
+    args = parser.parse_args()
 
-    # G_model = torch.load(g_model_out_path).eval()
-    # if torch.cuda.is_available():
-    #     G_model = G_model.cuda()
+    epoch = args.epoch
+    gpus = [0]
+    test_dir = args.test_dir
+    result_dir = args.result_dir
+    name = args.model_name
+    min_size = args.min_size
+    buildDir([result_dir])
+    testDataset = DataLoader(TestDataset(test_dir, min_size=min_size ), batch_size=1)
 
-    for index, data in enumerate(testDataset):
-        x = transforms.ToTensor()(data[0])
-        # y = G_model(x)
-        y = transforms.ToPILImage()(x)
-        plt.imshow(y,cmap="gray")
-        plt.show()
+    G_model = Model(epoch, name=name, gpus=gpus).model
+
+    print(G_model)
+    for root, dirs, files in os.walk(test_dir):
+        imagesNames = files
+        break
+
+    test_input = Variable()
+    if (len(gpus) > 0) & torch.cuda.is_available():
+        test_input = Variable().cuda()
+
+    for index, test_img in enumerate(testDataset):
+        batchsize, channel, row, col = test_img.size()
+        test_input.data.resize_(test_img.size()).copy_(test_img)  # test input data
+        # if index == 0:
+        #     writer.add_graph(G_model, test_input)
+        #     writer.close()
+        y = G_model(test_input).cpu()
+        y = transforms.ToPILImage()(y.reshape(1, row, col))
+        y.save("%s/%s_Mask.png" % (result_dir, imagesNames[index][:-4]))
+        print("%s/%s_Mask.png finished" % (result_dir, imagesNames[index][:-4]))
+        # plt.imshow(y, cmap="gray")
+        # plt.show()

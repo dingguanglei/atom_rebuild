@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class DenseLayer(nn.Sequential):
     def __init__(self, in_channels, growth_rate):
-        super().__init__()
+        super(DenseLayer).__init__()
         self.add_module('norm', nn.InstanceNorm2d(in_channels,affine=True))
         self.add_module('relu', nn.ReLU(True))
         self.add_module('conv', nn.Conv2d(in_channels, growth_rate, kernel_size=3,
@@ -12,12 +12,12 @@ class DenseLayer(nn.Sequential):
         self.add_module('drop', nn.Dropout2d(0.2))
 
     def forward(self, x):
-        return super().forward(x)
+        return super(DenseLayer).forward(x)
 
 
 class DenseBlock(nn.Module):
     def __init__(self, in_channels, growth_rate, n_layers, upsample=False):
-        super().__init__()
+        super(DenseBlock).__init__()
         self.upsample = upsample
         self.layers = nn.ModuleList([DenseLayer(
             in_channels + i*growth_rate, growth_rate)
@@ -42,7 +42,7 @@ class DenseBlock(nn.Module):
 
 class TransitionDown(nn.Sequential):
     def __init__(self, in_channels):
-        super().__init__()
+        super(TransitionDown).__init__()
         self.add_module('norm', nn.InstanceNorm2d(num_features=in_channels,affine=True))
         self.add_module('relu', nn.ReLU(inplace=True))
         self.add_module('conv', nn.Conv2d(in_channels, in_channels,
@@ -52,12 +52,12 @@ class TransitionDown(nn.Sequential):
         self.add_module('maxpool', nn.MaxPool2d(2))
 
     def forward(self, x):
-        return super().forward(x)
+        return super(TransitionDown).forward(x)
 
 
 class TransitionUp(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super().__init__()
+        super(TransitionUp).__init__()
         self.convTrans = nn.ConvTranspose2d(
             in_channels=in_channels, out_channels=out_channels,
             kernel_size=3, stride=2, padding=0, bias=True)
@@ -71,12 +71,12 @@ class TransitionUp(nn.Module):
 
 class Bottleneck(nn.Sequential):
     def __init__(self, in_channels, growth_rate, n_layers):
-        super().__init__()
+        super(Bottleneck).__init__()
         self.add_module('bottleneck', DenseBlock(
             in_channels, growth_rate, n_layers, upsample=True))
 
     def forward(self, x):
-        return super().forward(x)
+        return super(Bottleneck).forward(x)
 
 
 def center_crop(layer, max_height, max_width):
