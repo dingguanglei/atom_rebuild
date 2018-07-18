@@ -1,6 +1,7 @@
 # coding=utf-8
 import torch
-from torch.nn import Parameter, Module, Linear
+from math import log10
+from torch.nn import Parameter, Module, Linear,MSELoss
 from torch.autograd import Variable, grad
 import numpy as np
 
@@ -135,6 +136,14 @@ def jcbClamp(G_net, z, lmbda_max=20, lmbda_min=1, ep=1, use_gpu=False):
     l_min = (torch.min(Q, lmbda_min) - lmbda_min) ** 2
     return (l_max + l_min).mean()
 
+
+def getPsnr(fake, real, use_gpu = False):
+    mse_loss = MSELoss()
+    if use_gpu:
+        mse_loss = mse_loss.cuda()
+    mse = mse_loss(fake, real)
+    psnr = 10 * log10(1 / mse.data.item())
+    return psnr
 
 class Cutout(object):
     """Randomly mask out one or more patches from an image.

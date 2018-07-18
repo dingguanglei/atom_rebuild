@@ -20,7 +20,7 @@ if __name__ == '__main__':
     parser.add_argument('--test_dir', '-td', type=str, help='path of test directory', default="test")
     parser.add_argument('--result_dir', '-rd', type=str, help='path of result directory', default="result")
     parser.add_argument('--model_name', '-mn', type=str, help='model name', default="")
-    parser.add_argument('--min_size', '-mn', type=str, help='model name', default=32*4)
+    parser.add_argument('--min_size', '-ms', type=str, help='model name', default=32*4)
     args = parser.parse_args()
 
     epoch = args.epoch

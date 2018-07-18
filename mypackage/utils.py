@@ -1,8 +1,12 @@
 # coding=utf-8
+import random
 from torch import save, load
 from torch.nn import DataParallel
 import torch
 import time, os
+from tensorboardX import SummaryWriter
+import torchvision.transforms as transforms
+from torchvision.utils import make_grid
 
 
 class ElapsedTimer(object):
@@ -19,6 +23,34 @@ class ElapsedTimer(object):
 
     def elapsed_time(self):
         print("Elapsed: %s " % self.elapsed(time.time() - self.start_time))
+
+
+def loadModel(model_path, model_weights_path, gpus=None):
+    print("load model uses CPU...")
+    model = torch.load(model_path, map_location=lambda storage, loc: storage)
+    print("load weights uses CPU...")
+    weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage)
+
+    if model.module:
+        print("deal with dataparallel and extract module...")
+        model = model.module
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in weights.items():
+            name = k[7:]  # remove `module.`
+            new_state_dict[name] = v
+        weights = new_state_dict
+        # load params
+
+    model.load_state_dict(weights)
+    if torch.cuda.is_available() and (len(gpus) == 1):
+        print("convert to GPU %s" % str(gpus))
+        model = model.cuda()
+    elif torch.cuda.is_available() and (len(gpus) > 1):
+        print("convert to GPUs %s" % str(gpus))
+        model = DataParallel(model, gpus).cuda()
+
+    return model.eval()
 
 
 class Model():
@@ -53,7 +85,7 @@ class Model():
             model = model.cuda()
         elif torch.cuda.is_available() and (len(gpus) > 1):
             print("convert to GPUs %s" % str(gpus))
-            model = DataParallel(model,gpus).cuda()
+            model = DataParallel(model, gpus).cuda()
         # if torch.cuda.is_available() and (gpus is not None):
         #     print("load model uses GPU")
         #     model = torch.load(model_path, map_location=lambda storage, loc: storage.cuda(gpus))
@@ -94,29 +126,91 @@ def checkPoint(netG, netD, epoch, name=""):
     print("Checkpoint saved !")
 
 
-def loadCheckPoint(netG, netD, epoch, name=""):
-    net_g_model_out_path = "checkpoint/{}Model_weights_G_{}.pth".format(name, epoch)
-    net_d_model_out_path = "checkpoint/{}Model_weights_D_{}.pth".format(name, epoch)
-    netG.load_state_dict(load(net_g_model_out_path))
-    netD.load_state_dict(load(net_d_model_out_path))
-    print("Checkpoint loaded !")
-    return netG, netD
+# def loadCheckPoint(netG, netD, epoch, name=""):
+#     net_g_model_out_path = "checkpoint/{}Model_weights_G_{}.pth".format(name, epoch)
+#     net_d_model_out_path = "checkpoint/{}Model_weights_D_{}.pth".format(name, epoch)
+#     netG.load_state_dict(load(net_g_model_out_path))
+#     netD.load_state_dict(load(net_d_model_out_path))
+#     print("Checkpoint loaded !")
+#     return netG, netD
+#
+#
+# def loadG_Model(epoch):
+#     model_out_path = "checkpoint/Model_G_{}.pth".format(epoch)
+#     G_model = load(model_out_path)
+#     return G_model
+
+class Watcher(object):
+    def __init__(self, logdir="log"):
+        self.writer = SummaryWriter(log_dir=logdir)
+
+    def watchNetParams(self, network, global_step):
+        for name, param in network.named_parameters():
+            if "bias" in name:
+                continue
+            self.writer.add_histogram(name, param.clone().cpu().data.numpy(), global_step, bins="auto")
+
+    def watchLoss(self, loss_keys, loss_dic, global_step, tag="Train"):
+        for key in loss_keys:
+            self.writer.add_scalars(key, {tag: loss_dic[key][-1]}, global_step)
+
+    def watchImg(self, input, fake, real, global_step, tag="Train", show_imgs_num=3, mode="L"):
+        out = None
+        input_torch = None
+        prediction_torch = None
+        real_torch = None
+        batchSize = input.shape[0]
+        show_nums = min(show_imgs_num, batchSize)
+
+        mean = round(input.min())
+        std = round(input.max()) - round(input.min())
+
+        randindex_list = random.sample(list(range(batchSize)), show_nums)
+        for randindex in randindex_list:
+            input_torch = input[randindex].cpu().detach()
+            input_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(
+                input_torch)  # (-1,1)=>(0,1)   mean = -1,std = 2
+
+            prediction_torch = fake[randindex].cpu().detach()
+            prediction_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(prediction_torch)
+
+            real_torch = real[randindex].cpu().detach()
+            real_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(real_torch)
+            out_1 = torch.stack((input_torch, prediction_torch, real_torch))
+            if out is None:
+                out = out_1
+            else:
+                out = torch.cat((out_1, out))
+        out = make_grid(out, nrow=3)
+        self.writer.add_image('%s-in-pred-real' % tag, out, global_step)
+
+        input = transforms.ToPILImage()(input_torch).convert(mode)
+        prediction = transforms.ToPILImage()(prediction_torch).convert(mode)
+        real = transforms.ToPILImage()(real_torch).convert(mode)
+
+        buildDir("plots")
+        in_filename = "plots/%s/E%03d_in_.png" % (tag, global_step)
+        real_filename = "plots/%s/E%03d_real_.png" % (tag, global_step)
+        out_filename = "plots/%s/E%03d_out_.png" % (tag, global_step)
+        input.save(in_filename)
+        prediction.save(out_filename)
+        real.save(real_filename)
+
+    def watchNetwork(self, net, input_shape=None, *input):
+        if input_shape is not None:
+            assert (isinstance(input_shape, tuple) or isinstance(input_shape, list)), \
+                "param 'input_shape' should be list or tuple."
+            input = torch.autograd.Variable(torch.Tensor(input_shape), requires_grad=True)
+            res = net(input)
+        else:
+            res = net(*input)
+        self.writer.add_graph(net, res)
+
+    def close(self):
+        self.writer.close()
 
 
-def loadG_Model(epoch):
-    model_out_path = "checkpoint/Model_G_{}.pth".format(epoch)
-    G_model = load(model_out_path)
-    return G_model
-
-
-def writeNetwork(writer, net, *input):
-    if input == None:
-        input = torch.autograd.Variable(torch.Tensor(1, 1, 28, 28), requires_grad=True)
-    res = net(input)
-    writer.add_graph(net, res)
-
-
-def buildDir(dirs = ("plots", "plots/Test", "plots/Train", "plots/Valid", "checkpoint")):
+def buildDir(dirs=("plots", "plots/Test", "plots/Train", "plots/Valid", "checkpoint")):
     for dir in dirs:
         if not os.path.exists(dir):
             print("%s directory is not found. Build now!" % dir)

@@ -2,8 +2,53 @@
 from torch.nn import Module, Sequential, Conv2d, BatchNorm2d, InstanceNorm2d, LeakyReLU, Linear, Sigmoid, Upsample, \
     Tanh, Dropout, ReLU, MaxPool2d, AvgPool2d
 import torch
-from .shared.basic import getNormLayer,getActiveLayer
+from .shared.basic import getNormLayer, getActiveLayer
 
+
+# class NLayer_D(Module):
+#     def __init__(self, input_nc=1, output_nc=1, depth=64, use_sigmoid=True, use_liner=True, norm_type="batch",
+#                  active_type="ReLU"):
+#         super(NLayer_D, self).__init__()
+#         self.norm = getNormLayer(norm_type)
+#         self.active = getActiveLayer(active_type)
+#         self.use_sigmoid = use_sigmoid
+#         self.use_liner = use_liner
+#         # 256 x 256
+#         self.layer1 = Sequential(Conv2d(input_nc + output_nc, depth, kernel_size=8, stride=2, padding=3),
+#                                  LeakyReLU(0.2))
+#         # 128 x 128
+#         self.layer2 = Sequential(Conv2d(depth, depth * 2, kernel_size=4, stride=2, padding=1),
+#                                  self.norm(depth * 2, affine=True),
+#                                  LeakyReLU(0.2))
+#         # 64 x 64
+#         self.layer3 = Sequential(Conv2d(depth * 2, depth * 4, kernel_size=4, stride=2, padding=1),
+#                                  self.norm(depth * 4, affine=True),
+#                                  LeakyReLU(0.2))
+#         # 32 x 32
+#         self.layer4 = Sequential(Conv2d(depth * 4, depth * 8, kernel_size=4, stride=2, padding=1),
+#                                  self.norm(depth * 8, affine=True),
+#                                  LeakyReLU(0.2))
+#         # 16 x 16
+#         self.layer5 = Sequential(Conv2d(depth * 8, output_nc, kernel_size=5, stride=1, padding=2))
+#         # 16 x 16 ,1
+#         self.liner = Linear(256, 1)
+#         self.sigmoid = Sigmoid()
+#
+#     def forward(self, x, g):
+#         out = torch.cat((x, g), 1)
+#         out = self.layer1(out)
+#         out = self.layer2(out)
+#         out = self.layer3(out)
+#         out = self.layer4(out)
+#         out = self.layer5(out)
+#
+#         if self.use_liner:
+#             out = out.view(out.size(0), -1)
+#
+#         if self.use_sigmoid:
+#             out = self.sigmoid(out)
+#
+#         return out
 
 class NLayer_D(Module):
     def __init__(self, input_nc=1, output_nc=1, depth=64, use_sigmoid=True, use_liner=True, norm_type="batch",
@@ -14,22 +59,22 @@ class NLayer_D(Module):
         self.use_sigmoid = use_sigmoid
         self.use_liner = use_liner
         # 256 x 256
-        self.layer1 = Sequential(Conv2d(input_nc + output_nc, depth, kernel_size=8, stride=2, padding=3),
+        self.layer1 = Sequential(Conv2d(input_nc + output_nc, depth, kernel_size=7, stride=1, padding=3),
                                  LeakyReLU(0.2))
         # 128 x 128
-        self.layer2 = Sequential(Conv2d(depth, depth * 2, kernel_size=4, stride=2, padding=1),
+        self.layer2 = Sequential(Conv2d(depth, depth * 2, kernel_size=3, stride=1, padding=1),
                                  self.norm(depth * 2, affine=True),
-                                 LeakyReLU(0.2))
+                                 LeakyReLU(0.2), MaxPool2d(2, 2))
         # 64 x 64
-        self.layer3 = Sequential(Conv2d(depth * 2, depth * 4, kernel_size=4, stride=2, padding=1),
+        self.layer3 = Sequential(Conv2d(depth * 2, depth * 4, kernel_size=3, stride=1, padding=1),
                                  self.norm(depth * 4, affine=True),
-                                 LeakyReLU(0.2))
+                                 LeakyReLU(0.2), MaxPool2d(2, 2))
         # 32 x 32
-        self.layer4 = Sequential(Conv2d(depth * 4, depth * 8, kernel_size=4, stride=2, padding=1),
+        self.layer4 = Sequential(Conv2d(depth * 4, depth * 8, kernel_size=3, stride=1, padding=1),
                                  self.norm(depth * 8, affine=True),
-                                 LeakyReLU(0.2))
+                                 LeakyReLU(0.2), AvgPool2d(2, 2))
         # 16 x 16
-        self.layer5 = Sequential(Conv2d(depth * 8, output_nc, kernel_size=5, stride=1, padding=2))
+        self.layer5 = Sequential(Conv2d(depth * 8, output_nc, kernel_size=7, stride=1, padding=3))
         # 16 x 16 ,1
         self.liner = Linear(256, 1)
         self.sigmoid = Sigmoid()
@@ -58,29 +103,37 @@ class Unet_G(Module):
         self.active = getActiveLayer(active_type)
         self.depth = depth
         self.d0 = Sequential(Conv2d(input_nc, depth, 7, 1, 3), self.active)  # 256, 256, 16
-        self.d1 = Sequential(Conv2d(depth * 1, depth * 2, 5, 1, 2),  self.norm(depth * 2,affine=True),self.active, MaxPool2d(2, 2))  # 128, 128, 32
-        self.d2 = Sequential(Conv2d(depth * 2, depth * 2, 3, 1, 1),  self.norm(depth * 2,affine=True),self.active, MaxPool2d(2, 2))  # 64, 64, 32
-        self.d3 = Sequential(Conv2d(depth * 2, depth * 4, 3, 1, 1),  self.norm(depth * 4,affine=True),self.active, MaxPool2d(2, 2))  # 32, 32, 64
-        self.d4 = Sequential(Conv2d(depth * 4, depth * 4, 3, 1, 1),  self.norm(depth * 4,affine=True),self.active, MaxPool2d(2, 2))  # 16, 16, 64
-        self.d5 = Sequential(Conv2d(depth * 4, depth * 8, 3, 1, 1), self.norm(depth * 8,affine=True),self.active, MaxPool2d(2, 2))  # 8, 8, 128
-        self.d6 = Sequential(Conv2d(depth * 8, depth * 8, 3, 1, 1), self.norm(depth * 8,affine=True), self.active, AvgPool2d(2, 2))  # 4, 4, 128
-        self.d7 = Sequential(Conv2d(depth * 8, depth * 16, 3, 1, 1), self.norm(depth * 16,affine=True), self.active, AvgPool2d(2, 2))  # 2, 2, 256
-        self.d8 = Sequential(Conv2d(depth * 16, depth * 16, 3, 1, 1),  self.norm(depth * 16,affine=True),self.active)  # 2, 2, 256
+        self.d1 = Sequential(Conv2d(depth * 1, depth * 2, 5, 1, 2), self.norm(depth * 2, affine=True), self.active,
+                             MaxPool2d(2, 2))  # 128, 128, 32
+        self.d2 = Sequential(Conv2d(depth * 2, depth * 2, 3, 1, 1), self.norm(depth * 2, affine=True), self.active,
+                             MaxPool2d(2, 2))  # 64, 64, 32
+        self.d3 = Sequential(Conv2d(depth * 2, depth * 4, 3, 1, 1), self.norm(depth * 4, affine=True), self.active,
+                             MaxPool2d(2, 2))  # 32, 32, 64
+        self.d4 = Sequential(Conv2d(depth * 4, depth * 4, 3, 1, 1), self.norm(depth * 4, affine=True), self.active,
+                             MaxPool2d(2, 2))  # 16, 16, 64
+        self.d5 = Sequential(Conv2d(depth * 4, depth * 8, 3, 1, 1), self.norm(depth * 8, affine=True), self.active,
+                             MaxPool2d(2, 2))  # 8, 8, 128
+        self.d6 = Sequential(Conv2d(depth * 8, depth * 8, 3, 1, 1), self.norm(depth * 8, affine=True), self.active,
+                             AvgPool2d(2, 2))  # 4, 4, 128
+        self.d7 = Sequential(Conv2d(depth * 8, depth * 16, 3, 1, 1), self.norm(depth * 16, affine=True), self.active,
+                             AvgPool2d(2, 2))  # 2, 2, 256
+        self.d8 = Sequential(Conv2d(depth * 16, depth * 16, 3, 1, 1), self.norm(depth * 16, affine=True),
+                             self.active)  # 2, 2, 256
 
         self.u0 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 16, depth * 16, 3, 1, 1), self.norm(depth * 16,affine=True),self.active)
+                             Conv2d(depth * 16, depth * 16, 3, 1, 1), self.norm(depth * 16, affine=True), self.active)
         self.u1 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 8, depth * 8, 3, 1, 1), self.norm(depth * 8,affine=True) ,self.active)
+                             Conv2d(depth * 8, depth * 8, 3, 1, 1), self.norm(depth * 8, affine=True), self.active)
         self.u2 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 4, depth * 4, 3, 1, 1), self.norm(depth * 4,affine=True), self.active)
+                             Conv2d(depth * 4, depth * 4, 3, 1, 1), self.norm(depth * 4, affine=True), self.active)
         self.u3 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 4, depth * 4, 3, 1, 1),  self.norm(depth * 4,affine=True),self.active)
+                             Conv2d(depth * 4, depth * 4, 3, 1, 1), self.norm(depth * 4, affine=True), self.active)
         self.u4 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 2, depth * 2, 3, 1, 1), self.norm(depth * 2,affine=True), self.active)
+                             Conv2d(depth * 2, depth * 2, 3, 1, 1), self.norm(depth * 2, affine=True), self.active)
         self.u5 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 2, depth * 2, 3, 1, 1), self.norm(depth * 2,affine=True), self.active)
+                             Conv2d(depth * 2, depth * 2, 3, 1, 1), self.norm(depth * 2, affine=True), self.active)
         self.u6 = Sequential(Upsample(scale_factor=2),
-                             Conv2d(depth * 1, depth * 1, 5, 1, 2), self.norm(depth * 1,affine=True),self.active)
+                             Conv2d(depth * 1, depth * 1, 5, 1, 2), self.norm(depth * 1, affine=True), self.active)
 
         self.u7 = Sequential(Conv2d(depth * 1, output_nc, 7, 1, 3), Tanh())
 

@@ -4,6 +4,7 @@ import os
 import random
 import torch
 import copy
+
 from torch.autograd import Variable
 from torch.optim import Adam, RMSprop
 
@@ -12,8 +13,8 @@ from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 from mypackage.data import IMAGE_PATH, MASK_PATH_DIC, getDataLoader
-from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, writeNetwork,buildDir
-from mypackage.tricks import gradPenalty, spgradPenalty, jcbClamp
+from mypackage.utils import ElapsedTimer, checkPoint, watchNetwork, buildDir
+from mypackage.tricks import gradPenalty, spgradPenalty, jcbClamp, getPsnr
 from mypackage.model.define import defineNet
 from mypackage.model.unet import Unet_G
 from mypackage.model.wnet import NLayer_D, Wnet_G
@@ -29,8 +30,8 @@ class Trainer(object):
         self.netD = netD
         self.count = 0
         self.steps = len(train_loader)
-        self.losses = {'G': [], 'D': [], 'GP': [], "SGP": [], 'WD': [], 'GN': [], 'JC': []}
-        self.valid_losses = {'G': [], 'D': [], 'WD': [], 'JC': []}
+        self.losses = {'G': [], 'D': [], 'GP': [], "SGP": [], 'WD': [], 'GN': [], 'JC': [], 'PSNR': []}
+        self.valid_losses = {'G': [], 'D': [], 'WD': [], 'JC': [], 'PSNR': []}
         self.writer = SummaryWriter(log_dir="log")
         self.lr = 1e-3
         self.lr_decay = 0.94
@@ -39,10 +40,10 @@ class Trainer(object):
         self.opt_g = Adam(self.netG.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
         self.opt_d = RMSprop(self.netD.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
-        input = torch.autograd.Variable(torch.Tensor(4, 1, 256, 256), requires_grad=True)
-        net_cpu = copy.deepcopy(self.netG.module)
-        out = net_cpu.cpu()(input)
-        self.writer.add_graph(model=net_cpu.cpu(), input_to_model=input)
+        # input = torch.autograd.Variable(torch.Tensor(4, 1, 256, 256), requires_grad=True)
+        # net_cpu = copy.deepcopy(self.netG.module)
+        # out = net_cpu.cpu()(input)
+        # self.writer.add_graph(model=net_cpu.cpu(), input_to_model=input)
         # self.writer.close()
         # exit(1)
 
@@ -77,11 +78,12 @@ class Trainer(object):
         loss_g = -d_fake.mean() + jc
         loss_g.backward()
         self.opt_g.step()
+        psnr = getPsnr(fake, input, self.use_gpus)
+        self.losses["PSNR"].append(psnr)
         self.losses["JC"].append(jc.detach())
         self.losses["G"].append(loss_g.detach())
-        self._watchLoss(["JC"], loss_dic=self.losses, type="Train")
-        self._watchLoss(["G"], loss_dic=self.losses, type="Train")
-        g_log = "Loss_G: {:.4f}".format(loss_g.detach())
+        self._watchLoss(["PSNR", "JC", "G"], loss_dic=self.losses, type="Train")
+        g_log = "Loss_G: {:.4f} PSNR:{:.4f}".format(loss_g.detach(), psnr)
         return g_log
 
     def _train_epoch(self, input, real):
@@ -123,8 +125,8 @@ class Trainer(object):
             self._watchNetParams(self.netG, epoch)
             left_time = timer.elapsed((self.nepochs - epoch) * (time.time() - timer.start_time))
             print("leftTime: %s" % left_time)
-            if epoch % 5 == 0 :
-                self.lr = self.lr *self.lr_decay
+            if epoch % 5 == 0:
+                self.lr = self.lr * self.lr_decay
                 self.opt_g = Adam(net_G.parameters(), lr=self.lr, betas=(0.9, 0.99), weight_decay=self.weight_decay)
                 self.opt_d = RMSprop(net_D.parameters(), lr=self.lr, weight_decay=self.weight_decay)
                 print("change learning rate to %s" % self.lr)
@@ -145,14 +147,14 @@ class Trainer(object):
             #     print("change learning rate to %s" % self.lr)
             if epoch % 10 == 0:
                 self.predict()
-                checkPoint(net_G, net_D, epoch)
+                checkPoint(net_G, net_D, epoch, name="")
         self.writer.close()
 
     def _watchNetParams(self, net, count):
         for name, param in net.named_parameters():
             if "bias" in name:
                 continue
-            self.writer.add_histogram(name, param.clone().cpu().data.numpy(), count,bins="auto")
+            self.writer.add_histogram(name, param.clone().cpu().data.numpy(), count, bins="auto")
 
     def _watchLoss(self, loss_keys, loss_dic, type="Train"):
         for key in loss_keys:
@@ -212,6 +214,7 @@ class Trainer(object):
         avg_loss_g = 0
         avg_loss_d = 0
         avg_w_distance = 0
+        avg_psnr = 0
         # netG = netG._d
         self.netG.eval()
         self.netD.eval()
@@ -234,18 +237,23 @@ class Trainer(object):
             gp = gradPenalty(self.netD, real, fake, input=input)
             loss_d = d_fake.mean() - d_real.mean() + gp
             w_distance = d_real.mean() - d_fake.mean()
+            psnr = getPsnr(fake, input, self.use_gpus)
+
             # 求和
             avg_w_distance += w_distance.detach()
+            avg_psnr += psnr
             avg_loss_d += loss_d.detach()
             avg_loss_g += loss_g.detach()
         avg_w_distance = avg_w_distance / len_test_data
         avg_loss_d = avg_loss_d / len_test_data
         avg_loss_g = avg_loss_g / len_test_data
+        avg_psnr = avg_psnr / len_test_data
         self.valid_losses["WD"].append(avg_w_distance)
         self.valid_losses["D"].append(avg_loss_d)
         self.valid_losses["G"].append(avg_loss_g)
+        self.valid_losses["PSNR"].append(avg_psnr)
         # print("===> CV_Loss_D: {:.4f} CV_WD:{:.4f} CV_Loss_G: {:.4f}".format(avg_loss_d, avg_w_distance, avg_loss_g))
-        self._watchLoss(["D", "G", "WD"], loss_dic=self.valid_losses, type="Valid")
+        self._watchLoss(["D", "G", "WD", "PSNR"], loss_dic=self.valid_losses, type="Valid")
         self._watchImg(input, fake, real, type="Valid")
         self.netG.train()
         self.netD.train()
@@ -253,11 +261,6 @@ class Trainer(object):
         self.netD.zero_grad()
 
         return avg_w_distance
-
-
-
-
-
 
 
 if __name__ == '__main__':

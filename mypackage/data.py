@@ -173,7 +173,7 @@ def getDataLoader(image_dir_path,
             256, scale=(0.25, 1.0), ratio=(1, 1), interpolation=2),
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
-        Cutout(2, 50)
+        # Cutout(2, 50)
     ]
     train_transform_list_real = [
         transforms.RandomRotation(180, resample=Image.NEAREST),

@@ -12,7 +12,7 @@ from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
 from mypackage.data import IMAGE_PATH, MASK_PATH_DIC, NOISE_PATH_DIC, getDataLoader, BranchGetDataLoader
-from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, writeNetwork
+from mypackage.utils import ElapsedTimer, checkPoint, loadCheckPoint, loadG_Model, watchNetwork
 from mypackage.tricks import gradPenalty, spgradPenalty, jcbClamp,Branch_gradPenalty
 from mypackage.model.define import defineNet
 # from mypackage.model.unet import NLayer_D, Unet_G
