@@ -1,6 +1,6 @@
 # coding=utf-8
 import random
-from torch import save, load
+from torch import save, load,Tensor
 from torch.nn import DataParallel
 import torch
 import time, os
@@ -126,85 +126,73 @@ def checkPoint(netG, netD, epoch, name=""):
     print("Checkpoint saved !")
 
 
-# def loadCheckPoint(netG, netD, epoch, name=""):
-#     net_g_model_out_path = "checkpoint/{}Model_weights_G_{}.pth".format(name, epoch)
-#     net_d_model_out_path = "checkpoint/{}Model_weights_D_{}.pth".format(name, epoch)
-#     netG.load_state_dict(load(net_g_model_out_path))
-#     netD.load_state_dict(load(net_d_model_out_path))
-#     print("Checkpoint loaded !")
-#     return netG, netD
-#
-#
-# def loadG_Model(epoch):
-#     model_out_path = "checkpoint/Model_G_{}.pth".format(epoch)
-#     G_model = load(model_out_path)
-#     return G_model
-
 class Watcher(object):
     def __init__(self, logdir="log"):
         self.writer = SummaryWriter(log_dir=logdir)
 
-    def watchNetParams(self, network, global_step):
+    def netParams(self, network, global_step):
         for name, param in network.named_parameters():
             if "bias" in name:
                 continue
             self.writer.add_histogram(name, param.clone().cpu().data.numpy(), global_step, bins="auto")
 
-    def watchLoss(self, loss_keys, loss_dic, global_step, tag="Train"):
-        for key in loss_keys:
-            self.writer.add_scalars(key, {tag: loss_dic[key][-1]}, global_step)
+    def _torch_to_np(self, torch):
+        if isinstance(torch, list) and len(torch) == 1:
+            torch = torch[0]
+        if isinstance(torch, Tensor):
+            torch = torch.cpu().detach().item()
+        return torch
 
-    def watchImg(self, input, fake, real, global_step, tag="Train", show_imgs_num=3, mode="L"):
+    def scalars(self, key_list, value_list, global_step, tag="Train"):
+        value_list = list(map(self._torch_to_np, value_list))
+
+        for key, scalar in zip(key_list, value_list):
+            self.writer.add_scalars(key, {tag: scalar}, global_step)
+
+    def images(self, imgs_torch_list, title_list, global_step, tag="Train", show_imgs_num=3, mode="L",
+               mean=-1, std=2):
+        # :param mode: color mode ,default :'L'
+        # :param mean: do Normalize. if input is (-1, 1).this should be -1. to convert to (0,1)
+        # :param std: do Normalize. if input is (-1, 1).this should be 2. to convert to (0,1)
         out = None
-        input_torch = None
-        prediction_torch = None
-        real_torch = None
-        batchSize = input.shape[0]
+        batchSize = len(imgs_torch_list[0])
         show_nums = min(show_imgs_num, batchSize)
-
-        mean = round(input.min())
-        std = round(input.max()) - round(input.min())
+        columns_num = len(title_list)
+        imgs_stack = []
 
         randindex_list = random.sample(list(range(batchSize)), show_nums)
         for randindex in randindex_list:
-            input_torch = input[randindex].cpu().detach()
-            input_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(
-                input_torch)  # (-1,1)=>(0,1)   mean = -1,std = 2
+            for imgs_torch in imgs_torch_list:
+                img_torch = imgs_torch[randindex].cpu().detach()
+                img_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(
+                    img_torch)  # (-1,1)=>(0,1)   mean = -1,std = 2
+                imgs_stack.append(img_torch)
+            out_1 = torch.stack(imgs_stack)
+        if out is None:
+            out = out_1
+        else:
+            out = torch.cat((out_1, out))
+        out = make_grid(out, nrow=columns_num)
+        self.writer.add_image('%s:%s' % (tag, "-".join(title_list)), out, global_step)
 
-            prediction_torch = fake[randindex].cpu().detach()
-            prediction_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(prediction_torch)
+        for img, title in zip(imgs_stack, title_list):
+            img = transforms.ToPILImage()(img).convert(mode)
+            filename = "plots/%s/E%03d_%s_.png" % (tag, global_step, title)
+            img.save(filename)
+        buildDir(["plots"])
 
-            real_torch = real[randindex].cpu().detach()
-            real_torch = transforms.Normalize([mean, mean, mean], [std, std, std])(real_torch)
-            out_1 = torch.stack((input_torch, prediction_torch, real_torch))
-            if out is None:
-                out = out_1
-            else:
-                out = torch.cat((out_1, out))
-        out = make_grid(out, nrow=3)
-        self.writer.add_image('%s-in-pred-real' % tag, out, global_step)
-
-        input = transforms.ToPILImage()(input_torch).convert(mode)
-        prediction = transforms.ToPILImage()(prediction_torch).convert(mode)
-        real = transforms.ToPILImage()(real_torch).convert(mode)
-
-        buildDir("plots")
-        in_filename = "plots/%s/E%03d_in_.png" % (tag, global_step)
-        real_filename = "plots/%s/E%03d_real_.png" % (tag, global_step)
-        out_filename = "plots/%s/E%03d_out_.png" % (tag, global_step)
-        input.save(in_filename)
-        prediction.save(out_filename)
-        real.save(real_filename)
-
-    def watchNetwork(self, net, input_shape=None, *input):
+    def graph(self, net, input_shape=None, *input):
+        if hasattr(net, 'module'):
+            net = net.module
         if input_shape is not None:
             assert (isinstance(input_shape, tuple) or isinstance(input_shape, list)), \
                 "param 'input_shape' should be list or tuple."
-            input = torch.autograd.Variable(torch.Tensor(input_shape), requires_grad=True)
-            res = net(input)
+            input_tensor = torch.autograd.Variable(torch.ones(input_shape), requires_grad=True)
+            res = net(input_tensor)
+            self.writer.add_graph(net, input_tensor)
         else:
             res = net(*input)
-        self.writer.add_graph(net, res)
+            self.writer.add_graph(net, *input)
 
     def close(self):
         self.writer.close()
@@ -215,3 +203,4 @@ def buildDir(dirs=("plots", "plots/Test", "plots/Train", "plots/Valid", "checkpo
         if not os.path.exists(dir):
             print("%s directory is not found. Build now!" % dir)
             os.mkdir(dir)
+

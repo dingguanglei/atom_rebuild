@@ -6,18 +6,18 @@ from torch.autograd import Variable, grad
 import numpy as np
 
 
-def gradPenalty(D_net, real, fake, LAMBDA=10, input=None):
-    use_cuda = torch.cuda.is_available()
+def gradPenalty(D_net, real, fake, LAMBDA=10, input=None, use_gpu=False):
+
     batch_size = real.size()[0]
     # Calculate interpolation
     alpha = torch.rand(batch_size, 1, 1, 1)
     alpha = alpha.expand_as(real)
 
-    alpha = alpha.cuda() if use_cuda else alpha
+    alpha = alpha.cuda() if use_gpu else alpha
 
     interpolates = alpha * real + ((1 - alpha) * fake)
 
-    if torch.cuda.is_available():
+    if use_gpu:
         interpolates = interpolates.cuda()
     interpolates = Variable(interpolates, requires_grad=True)
     if input is not None:
@@ -28,7 +28,7 @@ def gradPenalty(D_net, real, fake, LAMBDA=10, input=None):
         outputs=disc_interpolates,
         inputs=interpolates,
         grad_outputs=torch.ones(disc_interpolates.size()).cuda()
-        if use_cuda else torch.ones(disc_interpolates.size()),
+        if use_gpu else torch.ones(disc_interpolates.size()),
         create_graph=True,
         retain_graph=True,
         only_inputs=True)[0]
@@ -37,14 +37,13 @@ def gradPenalty(D_net, real, fake, LAMBDA=10, input=None):
     return gradient_penalty
 
 
-def Branch_gradPenalty(D_net, reals, fakes, LAMBDA=10, input=None):
-    use_cuda = torch.cuda.is_available()
+def Branch_gradPenalty(D_net, reals, fakes, LAMBDA=10, input=None, use_gpu=False):
     batch_size = reals.size()[0]
     # Calculate interpolation
     alpha = torch.rand(batch_size, 1, 1, 1)
     alpha = alpha.expand_as(reals)
 
-    alpha = alpha.cuda() if use_cuda else alpha
+    alpha = alpha.cuda() if use_gpu else alpha
 
     interpolates = alpha * reals + ((1 - alpha) * fakes)
 
@@ -66,7 +65,7 @@ def Branch_gradPenalty(D_net, reals, fakes, LAMBDA=10, input=None):
         outputs=disc_interpolates,
         inputs=interpolates,
         grad_outputs=torch.ones(disc_interpolates.size()).cuda()
-        if use_cuda else torch.ones(disc_interpolates.size()),
+        if use_gpu else torch.ones(disc_interpolates.size()),
         create_graph=True,
         retain_graph=True,
         only_inputs=True,
@@ -76,7 +75,7 @@ def Branch_gradPenalty(D_net, reals, fakes, LAMBDA=10, input=None):
     return gradient_penalty
 
 
-def spgradPenalty(D_net, real, fake, input=None, type="G"):
+def spgradPenalty(D_net, real, fake, input=None, type="G", use_gpu=False):
     """sample gradient penalty
 
     :param D_net:
@@ -86,7 +85,6 @@ def spgradPenalty(D_net, real, fake, input=None, type="G"):
     :param type: select "G" or "X". default "X"
     :return:
     """
-    use_cuda = torch.cuda.is_available()
 
     if type == "G":
         data = fake
@@ -102,7 +100,7 @@ def spgradPenalty(D_net, real, fake, input=None, type="G"):
         outputs=d,
         inputs=data,
         grad_outputs=torch.ones(d.size()).cuda()
-        if use_cuda else torch.ones(d.size()),
+        if use_gpu else torch.ones(d.size()),
         create_graph=True,
         retain_graph=True,
         only_inputs=True)[0]
@@ -144,6 +142,7 @@ def getPsnr(fake, real, use_gpu = False):
     mse = mse_loss(fake, real)
     psnr = 10 * log10(1 / mse.data.item())
     return psnr
+
 
 class Cutout(object):
     """Randomly mask out one or more patches from an image.

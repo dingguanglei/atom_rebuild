@@ -1,6 +1,7 @@
 # coding=utf-8
 import os
 import platform
+import psutil
 import random
 import copy
 import math
@@ -48,30 +49,47 @@ class AtomDataset(Dataset):
                  transform_list_real=None):
         self.x = []
         self.y = []
+        self.x_dir_path = x_dir_path
+        self.y_dir_path = y_dir_path
+        self.x_file_names = x_file_names
+        self.y_file_names = y_file_names
         if transform_list_real is None:
             transform_list_real = transform_list_input
         self.transform_input = transforms.Compose(transform_list_input)
         self.transform_real = transforms.Compose(transform_list_real)
         self.nums = len(x_file_names)
-        for index in range(self.nums):
-            X_IMG_URL = slash.join((x_dir_path, x_file_names[index]))
-            Y_IMG_URL = slash.join((y_dir_path, y_file_names[index]))
-            with Image.open(X_IMG_URL) as img:
-                x_img = img.convert("L")
-            with Image.open(Y_IMG_URL) as img:
-                y_img = img.convert("L")
-            self.x.append(x_img)
-            self.y.append(y_img)
+        # for index in range(self.nums):
+        #     X_IMG_URL = slash.join((x_dir_path, x_file_names[index]))
+        #     Y_IMG_URL = slash.join((y_dir_path, y_file_names[index]))
+        #     with Image.open(X_IMG_URL) as img:
+        #         x_img = img.convert("L")
+        #     with Image.open(Y_IMG_URL) as img:
+        #         y_img = img.convert("L")
+        #     self.x.append(x_img)
+        #     self.y.append(y_img)
 
     def __len__(self):
         return self.nums
 
     def __getitem__(self, index):
+        X_IMG_URL = slash.join((self.x_dir_path, self.x_file_names[index]))
+        Y_IMG_URL = slash.join((self.y_dir_path, self.y_file_names[index]))
+        with Image.open(X_IMG_URL) as img:
+            x_img = img.convert("L")
+        with Image.open(Y_IMG_URL) as img:
+            y_img = img.convert("L")
+
         n = random.randint(1, 20000)
         random.seed(n)
-        x = self.transform_input(self.x[index])
+        x = self.transform_input(x_img)
         random.seed(n)
-        y = self.transform_real(self.y[index])
+        y = self.transform_real(y_img)
+
+        # n = random.randint(1, 20000)
+        # random.seed(n)
+        # x = self.transform_input(self.x[index])
+        # random.seed(n)
+        # y = self.transform_real(self.y[index])
         return x, y
 
 
@@ -80,6 +98,7 @@ class TestDataset(Dataset):
         self.test_img = []
         self.imagesNames = []
         self.min_size = min_size
+        self.test_dir_path = test_dir_path
         if transform_list is None:
             transform_list = [
                 transforms.ToTensor(),  # (H x W x C)=> (C x H x W)
@@ -92,17 +111,22 @@ class TestDataset(Dataset):
             break
         self.nums = len(self.imagesNames)
 
-        for index in range(self.nums):
-            IMG_URL = slash.join((test_dir_path, self.imagesNames[index]))
-            with Image.open(IMG_URL) as img:
-                img = img.convert("L")
-            self.test_img.append(img)
+        # for index in range(self.nums):
+        #     IMG_URL = slash.join((test_dir_path, self.imagesNames[index]))
+        #     with Image.open(IMG_URL) as img:
+        #         img = img.convert("L")
+        #     self.test_img.append(img)
 
     def __len__(self):
         return self.nums
 
     def __getitem__(self, index):
-        img = self.test_img[index]
+
+        IMG_URL = slash.join((self.test_dir_path, self.imagesNames[index]))
+        with Image.open(IMG_URL) as img:
+            img = img.convert("L")
+
+        # img = self.test_img[index]
         row, col = img.size
         padding_row = (self.min_size * math.ceil(row / self.min_size) - row)
         padding_col = (self.min_size * math.ceil(col / self.min_size) - col)
@@ -159,14 +183,16 @@ class BranchAtomDataset(Dataset):
 def getDataLoader(image_dir_path,
                   mask_dir_path,
                   batch_size=32,
-                  num_workers=2,
+                  num_workers=-1,
                   test_size=1000,
                   train_size=None,
                   valid_size=None):
     imagesNames = []
     maskNames = []
     x_cv_Names = []
-
+    if num_workers==-1:
+        print("use %d thread!" % psutil.cpu_count())
+        num_workers = psutil.cpu_count()
     train_transform_list_input = [
         transforms.RandomRotation(180, resample=Image.NEAREST),
         transforms.RandomResizedCrop(
@@ -352,6 +378,7 @@ def BranchGetDataLoader(image_dir_path,
 
 def CheckLoader(loader):
     count = 0
+
     for index, batch in enumerate(loader):
         input = batch[0]  # [2,1,256,256]
         real = batch[1]  # [2,3,256,256]
@@ -360,25 +387,23 @@ def CheckLoader(loader):
         a = transforms.ToPILImage()(a.reshape(1, 256, 256)).convert("L")
         b = transforms.Normalize([-1], [2])(real[0][0].reshape(1, 256, 256))
         b = transforms.ToPILImage()(b.reshape(1, 256, 256)).convert("L")
-        c = transforms.Normalize([-1], [2])(real[0][1].reshape(1, 256, 256))
-        c = transforms.ToPILImage()(c.reshape(1, 256, 256)).convert("L")
-        d = transforms.Normalize([-1], [2])(real[0][2].reshape(1, 256, 256))
-        d = transforms.ToPILImage()(d.reshape(1, 256, 256)).convert("L")
+        # c = transforms.Normalize([-1], [2])(real[0][1].reshape(1, 256, 256))
+        # c = transforms.ToPILImage()(c.reshape(1, 256, 256)).convert("L")
+        # d = transforms.Normalize([-1], [2])(real[0][2].reshape(1, 256, 256))
+        # d = transforms.ToPILImage()(d.reshape(1, 256, 256)).convert("L")
         a.show()
         b.show()
-        c.show()
-        d.show()
+        # c.show()
+        # d.show()
         count += 1
         if count == 4:
             break
 
-# if __name__ == '__main__':
 #
-#     trainLoader, testLoader, cvLoader = BranchGetDataLoader(image_dir_path=IMAGE_PATH,
-#                                                             label_dir_paths=[NOISE_PATH_DIC["nN"],
-#                                                                              NOISE_PATH_DIC["nN_nBG_SR"],
-#                                                                              MASK_PATH_DIC["gaussian"]],
-#                                                             test_size=10,
-#                                                             train_size=10,
-#                                                             batch_size=2)
+# if __name__ == '__main__':
+#     trainLoader, testLoader, cvLoader = getDataLoader(image_dir_path=IMAGE_PATH,
+#                                                       mask_dir_path=MASK_PATH_DIC["gaussian"],
+#                                                       test_size=10,
+#                                                       train_size=10000,
+#                                                       batch_size=2)
 #     CheckLoader(trainLoader)
