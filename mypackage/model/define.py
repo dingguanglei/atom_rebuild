@@ -3,7 +3,7 @@ import torch.cuda
 from torch.nn import Conv2d, Linear, ConvTranspose2d, InstanceNorm2d, BatchNorm2d, init, DataParallel, Module
 
 
-def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True, show_structure=False):
+def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True,use_checkpoint = False, show_structure=False):
     """define network, according to CPU, GPU and multi-GPUs.
 
     :param net: Network, type of module.
@@ -27,6 +27,8 @@ def defineNet(net, gpu_ids=(0, 1, 2, 3), use_weights_init=True, show_structure=F
     if use_weights_init:
         net.apply(weightsInit)
         print("apply weight init!")
+    if use_checkpoint:
+        net = loadModel(model_path, model_weights_path, gpus=None).train()
     return net
 
 
@@ -47,6 +49,8 @@ def print_network(net, show_structure=False):
 
 
 def weightsInit(m):
+    if not hasattr(m, "weight"):
+        return
     if isinstance(m, Conv2d):
         init.kaiming_normal_(m.weight)
         m.bias.data.zero_()

@@ -1,13 +1,13 @@
 # coding=utf-8
 import torch
 from math import log10
-from torch.nn import Parameter, Module, Linear,MSELoss
+from torch.nn import Parameter, Module, Linear, MSELoss
 from torch.autograd import Variable, grad
 import numpy as np
+from PIL.ImageEnhance import *
 
 
 def gradPenalty(D_net, real, fake, LAMBDA=10, input=None, use_gpu=False):
-
     batch_size = real.size()[0]
     # Calculate interpolation
     alpha = torch.rand(batch_size, 1, 1, 1)
@@ -135,7 +135,7 @@ def jcbClamp(G_net, z, lmbda_max=20, lmbda_min=1, ep=1, use_gpu=False):
     return (l_max + l_min).mean()
 
 
-def getPsnr(fake, real, use_gpu = False):
+def getPsnr(fake, real, use_gpu=False):
     mse_loss = MSELoss()
     if use_gpu:
         mse_loss = mse_loss.cuda()
@@ -184,6 +184,7 @@ class Cutout(object):
         img = img * mask
 
         return img
+
 
 
 class SpectralNorm(Module):
@@ -242,4 +243,3 @@ class SpectralNorm(Module):
     def forward(self, *args):
         self._update_u_v()
         return self.module.forward(*args)
-

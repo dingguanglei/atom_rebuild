@@ -68,7 +68,7 @@ class Model():
         print("load weights uses CPU...")
         weights = torch.load(model_weights_path, map_location=lambda storage, loc: storage)
 
-        if model.module:
+        if hasattr(model, "module"):
             print("deal with dataparallel...")
             model = model.module
             from collections import OrderedDict
@@ -119,9 +119,26 @@ def checkPoint(netG, netD, epoch, name=""):
     d_model_weights_path = "checkpoint/{}Model_weights_D_{}.pth".format(name, epoch)
     g_model_path = "checkpoint/{}Model_G_{}.pth".format(name, epoch)
     d_model_path = "checkpoint/{}Model_D_{}.pth".format(name, epoch)
-    save(netG.state_dict(), g_model_weights_path)
+
+    if hasattr(netG, "module"):
+        print("deal with dataparallel...")
+        netG = netG.module
+        weights = netG.state_dict()
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in weights.items():
+            name = k[7:]  # remove `module.`
+            new_state_dict[name] = v
+        save(new_state_dict, g_model_weights_path)
+        save(netG, g_model_path)
+
+    else:
+        save(netG.state_dict(), g_model_weights_path)
+        save(netG, g_model_path)
+
     save(netD.state_dict(), d_model_weights_path)
-    save(netG, g_model_path)
+    # save(netG.state_dict(), g_model_weights_path)
+    # save(netG, g_model_path)
     save(netD, d_model_path)
     print("Checkpoint saved !")
 
@@ -179,6 +196,7 @@ class Watcher(object):
             img = transforms.ToPILImage()(img).convert(mode)
             filename = "plots/%s/E%03d_%s_.png" % (tag, global_step, title)
             img.save(filename)
+
         buildDir(["plots"])
 
     def graph(self, net, input_shape=None, *input):
@@ -189,6 +207,7 @@ class Watcher(object):
                 "param 'input_shape' should be list or tuple."
             input_tensor = torch.autograd.Variable(torch.ones(input_shape), requires_grad=True)
             res = net(input_tensor)
+            del res
             self.writer.add_graph(net, input_tensor)
         else:
             res = net(*input)

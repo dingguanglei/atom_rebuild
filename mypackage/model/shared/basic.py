@@ -1,17 +1,17 @@
 # coding=utf-8
 from torch.nn import Module, Sequential, Conv2d, BatchNorm2d, InstanceNorm2d, LeakyReLU, Linear, Sigmoid, Upsample, \
-    Tanh, Dropout, ReLU, MaxPool2d, AvgPool2d, ModuleList, Parameter, Softmax
+    Tanh, Dropout, ReLU, MaxPool2d, AvgPool2d, ModuleList, Parameter, Softmax,LayerNorm,GroupNorm,ConvTranspose2d
 import torch
-
+from .spectral_normalization import SpectralNorm
 
 class downsampleBlock(Module):
     def __init__(self, channel_in_out, ksp=(3, 1, 1), pool_type="Max", active_type="ReLU",
-                 norm_type=None, groups=1):
+                 norm_type=None, groups=1,use_sn = False):
         super(downsampleBlock, self).__init__()
         kernel_size, stride, padding = ksp
         c_in, c_out = channel_in_out
 
-        self.convLayer_1 = convLayer(c_in, c_out, kernel_size, stride, padding, active_type, norm_type, groups)
+        self.convLayer_1 = convLayer(c_in, c_out, kernel_size, stride, padding, active_type, norm_type, groups,use_sn = use_sn)
 
         self.poolLayer = getPoolLayer(pool_type)
 
@@ -19,40 +19,45 @@ class downsampleBlock(Module):
 
     def forward(self, input):
         out = self.convLayer_1(input)
-        out = self.poolLayer(out)
+        if self.poolLayer is not None:
+            out = self.poolLayer(out)
         # out = self.convLayer_2(out)
         return out
 
 
 class upsampleBlock(Module):
-    def __init__(self, channel_in_out, ksp=(3, 1, 1), active_type="ReLU", norm_type=None, groups=1):
+    def __init__(self, channel_in_out, ksp=(3, 1, 1), active_type="ReLU", norm_type=None, groups=1,use_sn = False):
         super(upsampleBlock, self).__init__()
         kernel_size, stride, padding = ksp
         c_in, c_out = channel_in_out
-        c_shrunk = c_in // 2
+        # c_shrunk = c_in // 2
 
-        self.shrunkConvLayer_1 = convLayer(c_in, c_shrunk, 1, 1, 0, active_type, norm_type, 1)
+        # self.shrunkConvLayer_1 = convLayer(c_in, c_shrunk, 1, 1, 0, active_type, norm_type, 1)
 
-        self.convLayer_2 = convLayer(c_shrunk, c_out, kernel_size, stride, padding, active_type, norm_type, groups)
+        self.convLayer_2 = deconvLayer(c_in, c_out, kernel_size, stride, padding, active_type, norm_type, groups,use_sn = use_sn)
 
         self.upSampleLayer = Upsample(scale_factor=2)
 
     def forward(self, prev_input, now_input):
         out = torch.cat((prev_input, now_input), 1)
-        out = self.shrunkConvLayer_1(out)
+        # out = self.shrunkConvLayer_1(out)
         out = self.upSampleLayer(out)
         out = self.convLayer_2(out)
         return out
 
 
 class convLayer(Module):
-    def __init__(self, c_in, c_out, kernel_size=3, stride=1, padding=1, active_type="ReLU", norm_type=None, groups=1):
+    def __init__(self, c_in, c_out, kernel_size=3, stride=1, padding=1, active_type="ReLU", norm_type=None, groups=1,use_sn = False):
         super(convLayer, self).__init__()
         norm = getNormLayer(norm_type)
         act = getActiveLayer(active_type)
 
         self.module_list = ModuleList([])
-        self.module_list += [Conv2d(c_in, c_out, kernel_size, stride, padding, groups=groups)]
+
+        if use_sn:
+            self.module_list += [SpectralNorm(Conv2d(c_in, c_out, kernel_size, stride, padding, groups=groups))]
+        else:
+            self.module_list += [Conv2d(c_in, c_out, kernel_size, stride, padding, groups=groups)]
         if norm:
             self.module_list += [norm(c_out, affine=True)]
         self.module_list += [act]
@@ -63,9 +68,29 @@ class convLayer(Module):
             out = layer(out)
         return out
 
+class deconvLayer(Module):
+    def __init__(self, c_in, c_out, kernel_size=3, stride=1, padding=1, active_type="ReLU", norm_type=None, groups=1,use_sn = False):
+        super(deconvLayer, self).__init__()
+        norm = getNormLayer(norm_type)
+        act = getActiveLayer(active_type)
+
+        self.module_list = ModuleList([])
+        if use_sn:
+            self.module_list += [SpectralNorm(Conv2d(c_in, c_out, kernel_size, stride, padding, groups=groups))]
+        else:
+            self.module_list += [Conv2d(c_in, c_out, kernel_size, stride, padding, groups=groups)]
+        if norm:
+            self.module_list += [norm(c_out, affine=True)]
+        self.module_list += [act]
+
+    def forward(self, input):
+        out = input
+        for layer in self.module_list:
+            out = layer(out)
+        return out
 
 class normalBlock(Module):
-    def __init__(self, channel_in_out, ksp=(3, 1, 1), active_type="ReLU", norm_type=None, ksp_2=None, groups=1):
+    def __init__(self, channel_in_out, ksp=(3, 1, 1), active_type="ReLU", norm_type=None, ksp_2=None, groups=1,use_sn=True):
         super(normalBlock, self).__init__()
         c_in, c_out = channel_in_out
         kernel_size, stride, padding = ksp
@@ -83,7 +108,7 @@ class normalBlock(Module):
                 kernel_size_2, stride_2, padding_2)
 
         self.convLayer_1 = convLayer(c_in, c_out, kernel_size_2, stride_2, padding_2, active_type, norm_type,
-                                     groups=groups)
+                                     groups=groups,use_sn = use_sn)
         # self.convLayer_2 = convLayer(c_out, c_out, kernel_size, stride, padding, active_type, norm_type, groups=groups)
 
     def forward(self, input):
@@ -192,6 +217,10 @@ def getNormLayer(norm_type):
         norm_layer = InstanceNorm2d
     elif norm_type == 'switch':
         norm_layer = SwitchNorm
+    elif norm_type == 'layer':
+        norm_layer = LayerNorm
+    elif norm_type == 'group':
+        norm_layer = GroupNorm
     elif norm_type is None:
         norm_layer = None
     else:
@@ -217,9 +246,11 @@ def getActiveLayer(active_type):
     if active_type == 'ReLU':
         active_layer = ReLU()
     elif active_type == 'LeakyReLU':
-        active_layer = LeakyReLU(0.2)
+        active_layer = LeakyReLU(0.1)
     elif active_type == 'Tanh':
         active_layer = Tanh()
+    elif active_type == 'Sigmoid':
+        active_layer = Sigmoid()
     elif active_type is None:
         active_layer = None
     else:

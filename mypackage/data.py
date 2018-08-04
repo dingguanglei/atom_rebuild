@@ -4,6 +4,8 @@ import platform
 import psutil
 import random
 import copy
+import numpy as np
+from PIL.ImageEnhance import *
 import math
 import torch
 from PIL import Image
@@ -58,15 +60,7 @@ class AtomDataset(Dataset):
         self.transform_input = transforms.Compose(transform_list_input)
         self.transform_real = transforms.Compose(transform_list_real)
         self.nums = len(x_file_names)
-        # for index in range(self.nums):
-        #     X_IMG_URL = slash.join((x_dir_path, x_file_names[index]))
-        #     Y_IMG_URL = slash.join((y_dir_path, y_file_names[index]))
-        #     with Image.open(X_IMG_URL) as img:
-        #         x_img = img.convert("L")
-        #     with Image.open(Y_IMG_URL) as img:
-        #         y_img = img.convert("L")
-        #     self.x.append(x_img)
-        #     self.y.append(y_img)
+
 
     def __len__(self):
         return self.nums
@@ -79,17 +73,16 @@ class AtomDataset(Dataset):
         with Image.open(Y_IMG_URL) as img:
             y_img = img.convert("L")
 
-        n = random.randint(1, 20000)
-        random.seed(n)
+        seed = random.randint(1, 20000)
+        # random.seed(seed)
+
+        # x_img = transforms.ColorJitter(0.2, 0.2, 0.1)(x_img)
+
+        random.seed(seed)
         x = self.transform_input(x_img)
-        random.seed(n)
+        random.seed(seed)
         y = self.transform_real(y_img)
 
-        # n = random.randint(1, 20000)
-        # random.seed(n)
-        # x = self.transform_input(self.x[index])
-        # random.seed(n)
-        # y = self.transform_real(self.y[index])
         return x, y
 
 
@@ -193,13 +186,14 @@ def getDataLoader(image_dir_path,
     if num_workers==-1:
         print("use %d thread!" % psutil.cpu_count())
         num_workers = psutil.cpu_count()
+    # -------------------------------------------------------
     train_transform_list_input = [
         transforms.RandomRotation(180, resample=Image.NEAREST),
         transforms.RandomResizedCrop(
             256, scale=(0.25, 1.0), ratio=(1, 1), interpolation=2),
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
-        # Cutout(2, 50)
+        Cutout(2, 50)
     ]
     train_transform_list_real = [
         transforms.RandomRotation(180, resample=Image.NEAREST),
@@ -213,6 +207,8 @@ def getDataLoader(image_dir_path,
         transforms.ToTensor(),  # (H x W x C)=> (C x H x W)
         transforms.Normalize([0.5], [0.5])
     ]
+    # -------------------------------------------------------
+
     validLoader = None
     for root, dirs, files in os.walk(image_dir_path):
         imagesNames = files
@@ -227,7 +223,7 @@ def getDataLoader(image_dir_path,
         maskNames,
         shuffle=True,
         test_size=test_size,
-        random_state=35,
+        random_state=0,
         train_size=train_size)
 
     if valid_size is not None:
@@ -240,7 +236,7 @@ def getDataLoader(image_dir_path,
             y_train_Names,
             shuffle=True,
             test_size=valid_size,
-            random_state=35,
+            random_state=0,
             train_size=train_size)
         validDataset = AtomDataset(x_cv_Names, y_cv_Names,
                                    train_transform_list_input,
@@ -399,11 +395,12 @@ def CheckLoader(loader):
         if count == 4:
             break
 
-#
+# #
 # if __name__ == '__main__':
 #     trainLoader, testLoader, cvLoader = getDataLoader(image_dir_path=IMAGE_PATH,
 #                                                       mask_dir_path=MASK_PATH_DIC["gaussian"],
 #                                                       test_size=10,
 #                                                       train_size=10000,
-#                                                       batch_size=2)
+#                                                       batch_size=2,
+#                                                       num_workers=0)
 #     CheckLoader(trainLoader)
